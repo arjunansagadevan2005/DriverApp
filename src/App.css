@@ -1,0 +1,266 @@
+/* Registration Form Styling */
+.reg-input {
+    width: 100%;
+    padding: 1rem 1.25rem;
+    border-radius: 1rem;
+    background-color: #f8fafc; /* Slate 50 */
+    border: 2px solid transparent;
+    outline: none;
+    font-weight: 500;
+    transition: all 0.2s ease;
+}
+
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+
+.dark .reg-input {
+    background-color: #1e293b; /* Dark Surface */
+    color: white;
+}
+
+.reg-input:focus {
+    border-color: #0891b2; /* Brand 600 */
+    background-color: white;
+    box-shadow: 0 4px 12px rgba(8, 145, 178, 0.1);
+}
+
+.dark .reg-input:focus {
+    background-color: #0f172a; /* Dark BG */
+}
+
+/* Custom Scrollbar for the form */
+::-webkit-scrollbar {
+    width: 5px;
+}
+::-webkit-scrollbar-thumb {
+    background: #0891b2;
+    border-radius: 10px;
+}
+
+
+body { -webkit-tap-highlight-color: transparent; }
+        .no-scrollbar::-webkit-scrollbar { display: none; }
+        .glass { background: rgba(255, 255, 255, 0.95); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); }
+        .dark .glass { background: rgba(15, 23, 42, 0.95); }
+        .pt-safe-top { padding-top: env(safe-area-inset-top, 20px); }
+        .pb-safe { padding-bottom: env(safe-area-inset-bottom, 20px); }
+        
+        /* Map Specifics */
+        .map-container { z-index: 0; }
+        .bottom-sheet { z-index: 20; box-shadow: 0 -4px 20px rgba(0,0,0,0.1); }
+        
+        /* Animations */
+        .fade-in { animation: fadeIn 0.3s ease-out; }
+        .slide-up { animation: slideUp 0.3s ease-out; }
+        .scale-in { animation: scaleIn 0.2s ease-out; }
+        
+        /* --- NEW ORDER POPUP STYLES --- */
+        #new-order-popup { z-index: 9999; } /* Ensure it sits on top of everything */
+
+        .slide-in-from-right { animation: slideInFromRight 0.5s cubic-bezier(0.16, 1, 0.3, 1); }
+
+        @keyframes slideInFromRight {
+            from { transform: translateY(100%); opacity: 0; }
+            to { transform: translateY(0); opacity: 1; }
+        }
+
+        /* Pulse animation for the wait timer */
+        @keyframes pulse-soft {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.7; }
+        }
+        .animate-pulse-soft { animation: pulse-soft 2s infinite; }
+        /* --- THEME REVEAL ANIMATION (View Transitions) --- */
+        ::view-transition-old(root),
+        ::view-transition-new(root) {
+            animation: none;
+            mix-blend-mode: normal;
+        }
+
+        /* --- PREMIUM TRUCK ANIMATION --- */
+        @keyframes moveRoad { from { transform: translateX(0); } to { transform: translateX(-50%); } }
+        @keyframes moveCity { from { transform: translateX(0); } to { transform: translateX(-50%); } }
+        @keyframes driveBounce { 
+            0%, 100% { transform: translateY(0) rotate(0deg); } 
+            25% { transform: translateY(1px) rotate(0.5deg); } 
+            50% { transform: translateY(-1px) rotate(0deg); } 
+            75% { transform: translateY(0.5px) rotate(-0.5deg); } 
+        }
+        @keyframes wheelSpin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+        @keyframes exhaustPuff {
+            0% { transform: translate(0, 0) scale(0.5); opacity: 0.7; }
+            100% { transform: translate(-30px, -15px) scale(2); opacity: 0; }
+        }
+        @keyframes passingCloud { 
+            from { transform: translateX(100%); opacity: 0; } 
+            10% { opacity: 0.8; } 
+            90% { opacity: 0.8; } 
+            to { transform: translateX(-150%); opacity: 0; } 
+        }
+
+        .animate-road-fast { animation: moveRoad 0.6s linear infinite; }
+        .animate-city-slow { animation: moveCity 15s linear infinite; }
+        .animate-truck-physics { animation: driveBounce 0.8s ease-in-out infinite; }
+        .animate-wheel-spin { transform-origin: center; animation: wheelSpin 0.3s linear infinite; }
+        
+        .exhaust-puff {
+            position: absolute;
+            background: rgba(255,255,255,0.4);
+            border-radius: 50%;
+            pointer-events: none;
+        }
+        .puff-1 { width: 6px; height: 6px; animation: exhaustPuff 1s ease-out infinite; left: 5px; top: 45px; }
+        .puff-2 { width: 8px; height: 8px; animation: exhaustPuff 1s ease-out infinite 0.3s; left: 5px; top: 45px; }
+        .puff-3 { width: 5px; height: 5px; animation: exhaustPuff 1s ease-out infinite 0.6s; left: 5px; top: 45px; }
+
+        .animate-cloud-1 { animation: passingCloud 12s linear infinite; }
+        .animate-cloud-2 { animation: passingCloud 18s linear infinite 5s; }
+
+        /* UPDATED START - CHANGE 1: Hide routing direction panel */
+        .leaflet-routing-container {
+            display: none !important;
+        }
+        /* UPDATED END */
+
+        /* Notification Bell Ring Animation */
+        @keyframes bellRing {
+            0%, 100% { transform: rotate(0deg); }
+            10%, 30% { transform: rotate(-10deg); }
+            20%, 40% { transform: rotate(10deg); }
+        }
+        .bell-ring { animation: bellRing 1s ease-in-out infinite; }
+
+        /* Language Globe Spin */
+        @keyframes globeSpin {
+            0%, 100% { transform: rotate(0deg); }
+            50% { transform: rotate(180deg); }
+        }
+        .globe-spin { animation: globeSpin 3s ease-in-out infinite; }
+
+        /* Toast Notification */
+        #toast-container { position: fixed; top: 20px; left: 50%; transform: translateX(-50%); z-index: 100; pointer-events: none; width: 100%; display: flex;align-items: center; gap: 10px; }
+        .toast { pointer-events: auto; padding: 12px 24px; border-radius: 50px; background: rgba(0,0,0,0.8); color: white; font-size: 14px; font-weight: 600; box-shadow: 0 4px 12px rgba(0,0,0,0.15); animation: toastIn 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275); }
+        @keyframes toastIn { from { transform: translateY(-20px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
+
+        /* Real-time Notification Popup */
+        #notification-popup {
+            position: fixed;
+            top: -100%;
+            right: 16px;
+            width: 360px;
+            max-width: calc(100vw - 32px);
+            max-height: 70vh;
+            background: white;
+            border-radius: 20px;
+            box-shadow: 0 10px 40px rgba(0,0,0,0.2);
+            z-index: 999;
+            transition: top 0.4s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+            overflow: hidden;
+        }
+        #notification-popup.show {
+            top: 70px;
+        }
+        .dark #notification-popup {
+            background: #1e293b;
+            box-shadow: 0 10px 40px rgba(0,0,0,0.5);
+        }
+
+        /* Custom Leaflet Markers */
+        .custom-marker { background: none; border: none; }
+        .marker-pin {
+            width: 40px; height: 40px; border-radius: 50% 50% 50% 0;
+            position: absolute; transform: rotate(-45deg);
+            left: 50%; top: 50%; margin: -20px 0 0 -20px;
+            box-shadow: 0 4px 8px rgba(0,0,0,0.3);
+            display: flex; align-items: center; justify-content: center;
+        }
+        .marker-pin::after {
+            content: ''; width: 24px; height: 24px; margin: 8px 0 0 8px;
+            background: #fff; position: absolute; border-radius: 50%;
+        }
+        .marker-icon {
+            transform: rotate(45deg); z-index: 10; position: relative;
+        }
+        
+        /* Toggle Switch */
+        .toggle-checkbox:checked {
+            right: 0;
+            border-color: #06b6d4;
+        }
+        .toggle-checkbox:checked + .toggle-label {
+            background-color: #06b6d4;
+        }
+
+        /* Prime Partner Badge Animations */
+        @keyframes crownShine {
+            0%, 100% { 
+                transform: scale(1) rotate(0deg);
+                filter: drop-shadow(0 0 4px rgba(251, 191, 36, 0.6));
+            }
+            50% { 
+                transform: scale(1.1) rotate(-5deg);
+                filter: drop-shadow(0 0 8px rgba(251, 191, 36, 0.9));
+            }
+        }
+
+        @keyframes primeGlow {
+            0%, 100% { 
+                box-shadow: 0 0 10px rgba(251, 191, 36, 0.3), 0 0 20px rgba(251, 191, 36, 0.1);
+            }
+            50% { 
+                box-shadow: 0 0 20px rgba(251, 191, 36, 0.5), 0 0 30px rgba(251, 191, 36, 0.2);
+            }
+        }
+
+        @keyframes shimmerSlide {
+            0% { 
+                background-position: -200% center;
+            }
+            100% { 
+                background-position: 200% center;
+            }
+        }
+
+        .crown-shine {
+            animation: crownShine 2s ease-in-out infinite;
+        }
+
+        .prime-glow {
+            animation: primeGlow 2s ease-in-out infinite;
+        }
+
+        .prime-shimmer {
+            background: linear-gradient(90deg, 
+                transparent 0%, 
+                rgba(255,255,255,0.4) 50%, 
+                transparent 100%);
+            background-size: 200% 100%;
+            animation: shimmerSlide 3s linear infinite;
+        }
+
+        .progress-bar-animated {
+            transition: width 0.5s ease-out;
+        }
+
+        /* ═══════════════════════════════════════════════════ */
+        /* NAVIGATION CONFIRMATION MODAL - NEW FEATURE */
+        /* ═══════════════════════════════════════════════════ */
+        #navigation-modal {
+            z-index: 9998;
+        }
+        
+        .navigation-modal-content {
+            animation: slideUpFade 0.3s ease-out;
+        }
+        
+        @keyframes slideUpFade {
+            from {
+                transform: translateY(20px);
+                opacity: 0;
+            }
+            to {
+                transform: translateY(0);
+                opacity: 1;
+            }
+        }
