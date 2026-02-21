@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { supabase, ICONS } from '../config';
-import PrimePartnerView from './PrimePartnerView';
+
 
 // Helper to pull icons safely from config
 const getIcon = (name, size = 24, classes = '') => {
@@ -54,9 +54,6 @@ export default function ProfileSection({ t, setView, regData = {} }) {
         if (!activeModal) return null;
 
         let content = null;
-        if (activeModal === 'prime') {
-            return <PrimePartnerView weeklyOrders={weeklyOrders} onClose={() => setActiveModal(null)} />;
-        }
 
         if (activeModal === 'docs') {
             const renderDoc = (name, file) => `

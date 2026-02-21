@@ -682,8 +682,8 @@ export default function HomeSection({ t, regData }) {
             </div>
             
             {/* 3. SURYA WALLPAPER */}
-            <div>
-                <img src="https://th.bing.com/th/id/R.e7d3424217ab8a605c53806b52225001?rik=6BCDskidlZlvKA&riu=http%3a%2f%2fgetwallpapers.com%2fwallpaper%2ffull%2f6%2f4%2f6%2f697414-download-free-surya-hd-wallpaper-2018-1920x1080-meizu.jpg&ehk=niLsJKFrcuiZDD2GiiKSiDLv6cFjz7sUsjNpzqgCSfU%3d&risl=&pid=ImgRaw&r=0" style={{height: "9px"}} alt="banner" />
+            <div className=" margin: '0' rounded-3xl  text-white shadow-xl">
+                <img src="https://th.bing.com/th/id/R.e7d3424217ab8a605c53806b52225001?rik=6BCDskidlZlvKA&riu=http%3a%2f%2fgetwallpapers.com%2fwallpaper%2ffull%2f6%2f4%2f6%2f697414-download-free-surya-hd-wallpaper-2018-1920x1080-meizu.jpg&ehk=niLsJKFrcuiZDD2GiiKSiDLv6cFjz7sUsjNpzqgCSfU%3d&risl=&pid=ImgRaw&r=0" style={{height :"100%" , width: '100%' , borderRadius: '1.5rem'}} />
             </div>
         </div>
     </>
