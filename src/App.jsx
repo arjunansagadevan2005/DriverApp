@@ -5,6 +5,7 @@ import WelcomeView from './components/WelcomeView';
 import LoginView from './components/LoginView';
 import VerificationView from './components/VerificationView';
 import RegistrationView from './components/RegistrationView';
+import WalletView from './components/WalletView';
 import DashboardView from './components/DashboardView'; 
 
 function App() {
@@ -142,7 +143,8 @@ function App() {
       {view === 'login' && <LoginView regData={regData} setRegData={setRegData} handleLogin={handleLogin} loading={loading} t={t} />}
       {view === 'verification' && <VerificationView regData={regData} setRegData={setRegData} handleVerify={handleVerify} loading={loading} t={t} />}
       {view === 'registration' && <RegistrationView regData={regData} setRegData={setRegData} handleRegister={handleRegister} loading={loading} />}
-        {view === 'dashboard' && <DashboardView t={t} regData={regData} setView={setView} />}      
+      {view === 'wallet' && <WalletView setView={setView} t={t} />}
+      {view === 'dashboard' && <DashboardView t={t} regData={regData} setView={setView} />}      
       </div>
   </div>
 );
