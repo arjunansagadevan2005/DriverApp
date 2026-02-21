@@ -1,6 +1,5 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { supabase, ICONS } from '../config';
-
 
 // Helper to pull icons safely from config
 const getIcon = (name, size = 24, classes = '') => {
@@ -20,12 +19,54 @@ export default function ProfileSection({ t, setView, regData = {} }) {
         newOrders: true, earnings: true, promotions: true, updates: true
     });
 
-    // Mock Data to match your HTML state
-    const todayStats = { orders: 12, earnings: 2400 };
-    const weeklyOrders = 45;
-    const walletBalance = 250;
-    const referrals = 3;
-    const referralCode = 'DRV' + Math.random().toString(36).substr(2, 6).toUpperCase();
+    // 🔥 1. STATE FOR LIVE SUPABASE DATA
+    const [dbData, setDbData] = useState({ 
+        todayOrders: 0, 
+        todayEarnings: 0, 
+        weeklyOrders: 0, 
+        walletBalance: 0,
+        referrals: 0,
+        referralCode: "PENDING",
+        fullName: "Partner",
+        driverId: "PENDING",
+        bankAccount: "",
+        ifscCode: "",
+        vehicleType: "",
+        vehicleNumber: ""
+    });
+
+    // 🔥 2. FETCH ORIGINAL DETAILS FROM SUPABASE
+    useEffect(() => {
+        const fetchProfileData = async () => {
+            if (!regData?.mobile) return;
+
+            const { data, error } = await supabase
+                .from('driver_details') // Ensure this matches your table name
+                .select('today_orders, today_earnings, weekly_orders, wallet_balance, referrals, referral_code, full_name, driver_id, bank_account, ifsc_code, vehicle_type, vehicle_number')
+                .eq('mobile', regData.mobile)
+                .single();
+
+            if (data && !error) {
+                setDbData({
+                    todayOrders: data.today_orders || 0,
+                    todayEarnings: data.today_earnings || 0,
+                    weeklyOrders: data.weekly_orders || 0,
+                    walletBalance: data.wallet_balance || 0,
+                    referrals: data.referrals || 0,
+                    referralCode: data.referral_code || "NONE",
+                    fullName: data.full_name || "Partner",
+                    driverId: data.driver_id || "PENDING",
+                    bankAccount: data.bank_account || "",
+                    ifscCode: data.ifsc_code || "",
+                    vehicleType: data.vehicle_type || "Not Set",
+                    vehicleNumber: data.vehicle_number || "N/A"
+                });
+            }
+        };
+
+        fetchProfileData();
+    }, [regData?.mobile]);
+
     const achievements = [
         { id: 1, name: 'First Delivery', desc: 'Complete your first order', unlocked: true, icon: 'package' },
         { id: 2, name: 'Speed Demon', desc: 'Complete 5 orders in a day', unlocked: true, icon: 'truck' },
@@ -35,19 +76,17 @@ export default function ProfileSection({ t, setView, regData = {} }) {
         { id: 6, name: 'Night Owl', desc: 'Complete 10 night deliveries', unlocked: false, icon: 'moon' }
     ];
 
-    // Derived State
-    const driverName = regData.fullName || 'Partner';
-    const driverId = regData.driver_id || 'PENDING';
-    const isPrime = weeklyOrders >= 60;
-    const progressPercent = Math.min(100, (weeklyOrders / 60) * 100);
-    const ordersNeeded = Math.max(0, 60 - weeklyOrders);
+    // Derived Prime Logic State
+    const isPrime = dbData.weeklyOrders >= 60;
+    const progressPercent = Math.min(100, (dbData.weeklyOrders / 60) * 100);
+    const ordersNeeded = Math.max(0, 60 - dbData.weeklyOrders);
 
     const handleLogout = async () => {
         await supabase.auth.signOut();
         if (setView) setView('welcome');
     };
 
-    const showToast = (msg) => alert(msg); // Placeholder for your toast system
+    const showToast = (msg) => alert(msg);
 
     // --- EXACT MODALS FROM YOUR HTML ---
     const renderModal = () => {
@@ -81,7 +120,10 @@ export default function ProfileSection({ t, setView, regData = {} }) {
             );
         } 
         else if (activeModal === 'bank') {
-            const hasAccountDetails = regData.bankAccount && regData.ifsc;
+            const hasAccountDetails = dbData.bankAccount && dbData.ifscCode;
+            const safeBankAccount = dbData.bankAccount ? String(dbData.bankAccount) : '000000000000';
+            const safeIfsc = dbData.ifscCode ? String(dbData.ifscCode) : 'PENDING';
+
             content = (
                 <div>
                     <h2 className="text-xl font-bold mb-4 dark:text-white flex items-center gap-2">
@@ -99,16 +141,16 @@ export default function ProfileSection({ t, setView, regData = {} }) {
                                         <span dangerouslySetInnerHTML={{ __html: getIcon('card', 28, 'opacity-75') }} />
                                     </div>
                                     <div className="font-mono text-2xl tracking-widest mb-6 font-bold">
-                                        {regData.bankAccount.replace(/(\d{4})/g, '$1 ').trim()}
+                                        {safeBankAccount.replace(/(\d{4})/g, '$1 ').trim()}
                                     </div>
                                     <div className="flex justify-between items-end">
                                         <div>
                                             <div className="text-xs opacity-50 mb-1">ACCOUNT HOLDER</div>
-                                            <div className="font-semibold text-sm">{(regData.fullName || 'Partner').toUpperCase()}</div>
+                                            <div className="font-semibold text-sm">{dbData.fullName.toUpperCase()}</div>
                                         </div>
                                         <div className="text-right">
                                             <div className="text-xs opacity-50 mb-1">IFSC CODE</div>
-                                            <div className="font-semibold text-sm">{regData.ifsc.toUpperCase()}</div>
+                                            <div className="font-semibold text-sm">{safeIfsc.toUpperCase()}</div>
                                         </div>
                                     </div>
                                 </div>
@@ -121,7 +163,7 @@ export default function ProfileSection({ t, setView, regData = {} }) {
                                         <div className="w-8 h-8 rounded-lg bg-brand-50 dark:bg-brand-900/20 flex items-center justify-center text-brand-600 dark:text-brand-400" dangerouslySetInnerHTML={{ __html: getIcon('hash', 16) }} />
                                         <div>
                                             <div className="text-xs text-slate-500 dark:text-slate-400">Account Number</div>
-                                            <div className="font-mono font-semibold text-slate-900 dark:text-white">{regData.bankAccount}</div>
+                                            <div className="font-mono font-semibold text-slate-900 dark:text-white">{safeBankAccount}</div>
                                         </div>
                                     </div>
                                 </div>
@@ -130,7 +172,7 @@ export default function ProfileSection({ t, setView, regData = {} }) {
                                         <div className="w-8 h-8 rounded-lg bg-purple-50 dark:bg-purple-900/20 flex items-center justify-center text-purple-600 dark:text-purple-400" dangerouslySetInnerHTML={{ __html: getIcon('code', 16) }} />
                                         <div>
                                             <div className="text-xs text-slate-500 dark:text-slate-400">IFSC Code</div>
-                                            <div className="font-mono font-semibold text-slate-900 dark:text-white">{regData.ifsc.toUpperCase()}</div>
+                                            <div className="font-mono font-semibold text-slate-900 dark:text-white">{safeIfsc.toUpperCase()}</div>
                                         </div>
                                     </div>
                                 </div>
@@ -148,7 +190,7 @@ export default function ProfileSection({ t, setView, regData = {} }) {
                         <div className="text-center py-12">
                             <div className="w-20 h-20 bg-slate-100 dark:bg-slate-800 rounded-full flex items-center justify-center mx-auto mb-4 text-slate-400" dangerouslySetInnerHTML={{ __html: getIcon('card', 40) }} />
                             <h3 className="text-lg font-bold text-slate-700 dark:text-slate-300 mb-2">No Bank Account Linked</h3>
-                            <p className="text-sm text-slate-500 dark:text-slate-400 mb-6">Please complete your registration to add bank details</p>
+                            <p className="text-sm text-slate-500 dark:text-slate-400 mb-6">Please contact support to add your bank details</p>
                         </div>
                     )}
                 </div>
@@ -187,20 +229,20 @@ export default function ProfileSection({ t, setView, regData = {} }) {
                         <p className="text-sm text-amber-700 dark:text-amber-400 mb-2 font-semibold">{t('your_code')}</p>
                         <div className="flex items-center gap-2 mb-3">
                             <div className="flex-1 bg-white dark:bg-slate-800 rounded-lg p-3 font-mono text-2xl font-black text-amber-600 dark:text-amber-400 text-center">
-                                {referralCode}
+                                {dbData.referralCode}
                             </div>
-                            <button onClick={() => { navigator.clipboard.writeText(referralCode); showToast('Copied!'); }} className="p-3 bg-amber-600 text-white rounded-lg hover:bg-amber-700 active:scale-95 transition-transform" dangerouslySetInnerHTML={{ __html: getIcon('copy', 20) }} />
+                            <button onClick={() => { navigator.clipboard.writeText(dbData.referralCode); showToast('Copied!'); }} className="p-3 bg-amber-600 text-white rounded-lg hover:bg-amber-700 active:scale-95 transition-transform" dangerouslySetInnerHTML={{ __html: getIcon('copy', 20) }} />
                         </div>
                         <p className="text-xs text-amber-600 dark:text-amber-400">{t('share_code')}</p>
                     </div>
                     <div className="grid grid-cols-2 gap-3 mb-4">
                         <div className="bg-white dark:bg-slate-800 rounded-xl p-4 border border-slate-200 dark:border-slate-700">
                             <p className="text-xs text-slate-500 dark:text-slate-400 mb-1">{t('total_referrals')}</p>
-                            <p className="text-2xl font-black text-slate-900 dark:text-white">{referrals}</p>
+                            <p className="text-2xl font-black text-slate-900 dark:text-white">{dbData.referrals}</p>
                         </div>
                         <div className="bg-white dark:bg-slate-800 rounded-xl p-4 border border-slate-200 dark:border-slate-700">
                             <p className="text-xs text-slate-500 dark:text-slate-400 mb-1">{t('referral_earnings')}</p>
-                            <p className="text-2xl font-black text-green-600 dark:text-green-400">₹{referrals * 500}</p>
+                            <p className="text-2xl font-black text-green-600 dark:text-green-400">₹{dbData.referrals * 500}</p>
                         </div>
                     </div>
                     <button onClick={() => showToast('Sharing...')} className="w-full py-4 bg-amber-600 text-white rounded-xl font-bold flex items-center justify-center gap-2">
@@ -230,15 +272,14 @@ export default function ProfileSection({ t, setView, regData = {} }) {
                         </div>
                         <div className="rounded-2xl p-4 border border-green-200 bg-green-50 dark:bg-green-900/20 dark:border-green-800">
                             <p className="text-xs font-semibold text-green-700 dark:text-green-400 mb-1">Earnings</p>
-                            <p className="text-xl font-black text-green-900 dark:text-green-300">₹2.4k</p>
+                            <p className="text-xl font-black text-green-900 dark:text-green-300">₹{dbData.todayEarnings}</p>
                         </div>
                         <div className="rounded-2xl p-4 border border-purple-200 bg-purple-50 dark:bg-purple-900/20 dark:border-purple-800">
                             <p className="text-xs font-semibold text-purple-700 dark:text-purple-400 mb-1">Trips</p>
-                            <p className="text-xl font-black text-purple-900 dark:text-purple-300">18</p>
+                            <p className="text-xl font-black text-purple-900 dark:text-purple-300">{dbData.todayOrders}</p>
                         </div>
                     </div>
 
-                    {/* Complex Chart Replacement Area */}
                     <div className="bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700 rounded-2xl p-6 mb-5 h-64 flex flex-col justify-center items-center text-center">
                          <span dangerouslySetInnerHTML={{ __html: getIcon('barChart', 48, 'text-slate-300 dark:text-slate-600 mb-2') }} />
                          <p className="text-sm font-bold text-slate-500 dark:text-slate-400">Dynamic <span className="capitalize text-brand-600">{perfPeriod}</span> Chart Area</p>
@@ -266,7 +307,7 @@ export default function ProfileSection({ t, setView, regData = {} }) {
             const topDrivers = [
                 { name: 'Rajesh Kumar', earnings: 15420, trips: 87, rank: 1 },
                 { name: 'Vikram Singh', earnings: 14850, trips: 82, rank: 2 },
-                { name: 'You', earnings: todayStats.earnings, trips: todayStats.orders, rank: 8 },
+                { name: 'You', earnings: dbData.todayEarnings, trips: dbData.todayOrders, rank: 8 },
                 { name: 'Arjun Patel', earnings: 12300, trips: 71, rank: 3 },
                 { name: 'Suresh Reddy', earnings: 11900, trips: 68, rank: 4 }
             ];
@@ -370,7 +411,7 @@ export default function ProfileSection({ t, setView, regData = {} }) {
                                 <div className="w-12 h-12 rounded-full bg-brand-600 flex items-center justify-center text-white" dangerouslySetInnerHTML={{ __html: getIcon('truck', 24) }} />
                                 <div>
                                     <p className="text-xs text-brand-700 dark:text-brand-400 font-semibold uppercase">Vehicle Type</p>
-                                    <p className="text-lg font-black text-brand-900 dark:text-brand-300 capitalize">{regData.vehicleType || 'Not Set'}</p>
+                                    <p className="text-lg font-black text-brand-900 dark:text-brand-300 capitalize">{dbData.vehicleType}</p>
                                 </div>
                             </div>
                         </div>
@@ -378,11 +419,11 @@ export default function ProfileSection({ t, setView, regData = {} }) {
                         <div className="grid grid-cols-2 gap-3">
                             <div className="bg-white dark:bg-slate-800 rounded-xl p-4 border border-slate-200 dark:border-slate-700">
                                 <p className="text-xs text-slate-500 dark:text-slate-400 mb-1 font-semibold">Vehicle Number</p>
-                                <p className="text-base font-black text-slate-900 dark:text-white uppercase">{regData.vehicleNumber || 'N/A'}</p>
+                                <p className="text-base font-black text-slate-900 dark:text-white uppercase">{dbData.vehicleNumber}</p>
                             </div>
                             <div className="bg-white dark:bg-slate-800 rounded-xl p-4 border border-slate-200 dark:border-slate-700">
                                 <p className="text-xs text-slate-500 dark:text-slate-400 mb-1 font-semibold">Weight Limit</p>
-                                <p className="text-base font-black text-slate-900 dark:text-white">{regData.driverWeightLimit || 0} kg</p>
+                                <p className="text-base font-black text-slate-900 dark:text-white">Standard</p>
                             </div>
                         </div>
                         
@@ -428,7 +469,7 @@ export default function ProfileSection({ t, setView, regData = {} }) {
                 </div>
                 <div>
                     <div className="flex items-center gap-2">
-                        <h2 className="text-xl font-bold text-slate-900 dark:text-white">{driverName}</h2>
+                        <h2 className="text-xl font-bold text-slate-900 dark:text-white">{dbData.fullName}</h2>
                         {isPrime && (
                             <div className="crown-shine inline-block text-amber-500" dangerouslySetInnerHTML={{ __html: getIcon('crown', 20) }} />
                         )}
@@ -436,7 +477,7 @@ export default function ProfileSection({ t, setView, regData = {} }) {
                     <div className="flex items-center gap-1 text-yellow-500 font-bold text-sm">
                         <span dangerouslySetInnerHTML={{ __html: getIcon('star', 14, 'fill-current') }} /> 4.9 Rating
                     </div>
-                    <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">Driver ID: #{driverId}</p>
+                    <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">Driver ID: #{dbData.driverId}</p>
                 </div>
             </div>
 
@@ -447,7 +488,7 @@ export default function ProfileSection({ t, setView, regData = {} }) {
                         <span dangerouslySetInnerHTML={{ __html: getIcon('barChart', 16, 'text-blue-600 dark:text-blue-400') }} />
                         <span className="text-xs font-bold text-blue-600 dark:text-blue-400">{t('today_stats')}</span>
                     </div>
-                    <p className="text-2xl font-black text-blue-700 dark:text-blue-300">{todayStats.orders}</p>
+                    <p className="text-2xl font-black text-blue-700 dark:text-blue-300">{dbData.todayOrders}</p>
                     <p className="text-xs text-blue-600 dark:text-blue-400">{t('trips')}</p>
                 </div>
                 <div className="bg-gradient-to-br from-green-50 to-green-100 dark:from-green-900/20 dark:to-green-800/20 rounded-2xl p-4 border border-green-200 dark:border-green-800">
@@ -455,7 +496,7 @@ export default function ProfileSection({ t, setView, regData = {} }) {
                         <span dangerouslySetInnerHTML={{ __html: getIcon('wallet', 16, 'text-green-600 dark:text-green-400') }} />
                         <span className="text-xs font-bold text-green-600 dark:text-green-400">{t('todays_earnings')}</span>
                     </div>
-                    <p className="text-2xl font-black text-green-700 dark:text-green-300">₹{todayStats.earnings}</p>
+                    <p className="text-2xl font-black text-green-700 dark:text-green-300">₹{dbData.todayEarnings}</p>
                     <p className="text-xs text-green-600 dark:text-green-400">Earnings</p>
                 </div>
             </div>
@@ -467,7 +508,7 @@ export default function ProfileSection({ t, setView, regData = {} }) {
                         <div className={`w-12 h-12 rounded-full flex items-center justify-center ${isPrime ? 'bg-gradient-to-br from-amber-400 to-yellow-500 text-white' : 'bg-slate-200 dark:bg-slate-700 text-slate-500'}`} dangerouslySetInnerHTML={{ __html: getIcon('crown', 24) }} />
                         <div>
                             <h3 className={`font-black text-base ${isPrime ? 'text-amber-700 dark:text-amber-400' : 'text-slate-700 dark:text-slate-300'}`}>{isPrime ? 'Prime Partner' : 'Normal Partner'}</h3>
-                            <p className={`text-xs font-semibold ${isPrime ? 'text-amber-600 dark:text-amber-500' : 'text-slate-500 dark:text-slate-400'}`}>{weeklyOrders} orders this week</p>
+                            <p className={`text-xs font-semibold ${isPrime ? 'text-amber-600 dark:text-amber-500' : 'text-slate-500 dark:text-slate-400'}`}>{dbData.weeklyOrders} orders this week</p>
                         </div>
                     </div>
                     {isPrime ? (
@@ -497,7 +538,6 @@ export default function ProfileSection({ t, setView, regData = {} }) {
                 ) : (
                     <p className={`text-sm font-semibold ${progressPercent >= 50 ? 'text-amber-700 dark:text-amber-400' : 'text-slate-600 dark:text-slate-400'}`}>
                         {ordersNeeded} more {ordersNeeded === 1 ? 'order' : 'orders'} to become a Prime Partner! 
-                        {progressPercent >= 50 ? ' 🔥 You\'re halfway there!' : ''}
                     </p>
                 )}
             </div>
@@ -522,7 +562,7 @@ export default function ProfileSection({ t, setView, regData = {} }) {
                         <span dangerouslySetInnerHTML={{ __html: getIcon('gift', 20, 'text-amber-600 dark:text-amber-400') }} />
                         <div className="text-left">
                             <p className="font-bold text-slate-900 dark:text-white">Refer & Earn</p>
-                            <p className="text-xs text-slate-600 dark:text-slate-400">{referrals} referrals • ₹{referrals * 500} earned</p>
+                            <p className="text-xs text-slate-600 dark:text-slate-400">{dbData.referrals} referrals • ₹{dbData.referrals * 500} earned</p>
                         </div>
                     </div>
                     <span dangerouslySetInnerHTML={{ __html: getIcon('arrowRight', 18, 'text-amber-600 dark:text-amber-400') }} />
@@ -545,7 +585,7 @@ export default function ProfileSection({ t, setView, regData = {} }) {
                     <div className="w-10 h-10 rounded-full bg-white/10 flex items-center justify-center" dangerouslySetInnerHTML={{ __html: getIcon('wallet', 20) }} />
                     <div className="text-left">
                         <p className="text-xs text-slate-400 font-bold uppercase">{t('wallet_bal')}</p>
-                        <p className="font-black text-xl">₹{walletBalance.toFixed(0)}</p>
+                        <p className="font-black text-xl">₹{dbData.walletBalance}</p>
                     </div>
                 </div>
                 <div className="bg-brand-600 px-3 py-1.5 rounded-lg text-xs font-bold">View</div>
