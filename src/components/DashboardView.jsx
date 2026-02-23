@@ -13,10 +13,15 @@ export default function DashboardView({ t, regData, setView }) {
       
       {/* CONTENT AREA - Dynamic based on state */}
       <main className="flex-1 overflow-y-auto no-scrollbar pb-20">
-        {/* 2. 🔥 Pass regData to the Home and Profile sections */}
-        {activeTab === 'home' && <HomeSection t={t} regData={regData} />}
-        {activeTab === 'orders' && <OrdersSection t={t} />}
-        {activeTab === 'earnings' && <EarningsSection t={t} />}
+        {/* 🔥 FIX: Passed setActiveTab to HomeSection so it can change tabs! */}
+        {activeTab === 'home' && <HomeSection t={t} regData={regData} setActiveTab={setActiveTab} />}
+        
+        {/* 🔥 FIX: Passed regData so Orders knows your vehicle type! */}
+        {activeTab === 'orders' && <OrdersSection t={t} regData={regData} />}
+        
+        {/* 🔥 FIX: Passed regData so Earnings knows your mobile number! */}
+        {activeTab === 'earnings' && <EarningsSection t={t} regData={regData} />}
+        
         {activeTab === 'profile' && <ProfileSection t={t} regData={regData} setView={setView} />}
       </main>
 
@@ -24,7 +29,7 @@ export default function DashboardView({ t, regData, setView }) {
       <nav className="fixed bottom-0 left-0 right-0 pb-safe pt-2 px-6 bg-white/90 dark:bg-dark-surface/90 border-t border-slate-100 dark:border-dark-border glass z-50">
         <div className="flex justify-between items-center h-16 max-w-md mx-auto">
           <NavButton icon="home" label="Home" active={activeTab === 'home'} onClick={() => setActiveTab('home')} />
-          <NavButton icon="orders" label="Orders" active={activeTab === 'orders'} onClick={() => setActiveTab('orders')} badge={2} />
+          <NavButton icon="orders" label="Orders" active={activeTab === 'orders'} onClick={() => setActiveTab('orders')} badge={0} />
           <NavButton icon="earnings" label="Earnings" active={activeTab === 'earnings'} onClick={() => setActiveTab('earnings')} />
           <NavButton icon="profile" label="Profile" active={activeTab === 'profile'} onClick={() => setActiveTab('profile')} />
         </div>

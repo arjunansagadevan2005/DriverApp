@@ -216,9 +216,11 @@ function NavigationModal({ order, onClose, onGoToLocation }) {
 // ═══════════════════════════════════════════════════════════════════════════
 // MAIN HOME SECTION
 // ═══════════════════════════════════════════════════════════════════════════
-export default function HomeSection({ t, regData }) {
+// 🔥 FIX: Added setActiveTab to props!
+export default function HomeSection({ t, regData, setActiveTab }) {
   const [isDark, setIsDark] = useState(() => localStorage.getItem("theme") === "true");
-  const [isOnline, setIsOnline] = useState(false);
+  // 🔥 Remembers Online status across tabs
+  const [isOnline, setIsOnline] = useState(() => localStorage.getItem("isOnline") === "true");
   const [ringingOrder, setRingingOrder] = useState(null); 
   const [navigatingOrder, setNavigatingOrder] = useState(null);
   const [orders, setOrders] = useState([]);
@@ -227,36 +229,39 @@ export default function HomeSection({ t, regData }) {
   const [showLangModal, setShowLangModal] = useState(false);
   const [currentLang, setCurrentLang] = useState(() => localStorage.getItem("language") || "en");
   
-  // 1. Convert fake stats into dynamic React State
+  // 🔥 ADDED REAL STATE FOR DRIVER DETAILS
   const [todayStats, setTodayStats] = useState({ orders: 0, earnings: 0, onlineMinutes: 0 });
   const [weeklyOrders, setWeeklyOrders] = useState(0);
+  const [driverVehicle, setDriverVehicle] = useState(""); 
+  const [driverName, setDriverName] = useState(regData?.fullName || "Partner");
 
-  // 2. Automatically calculate goals based on the real dynamic state
+  // Automatically calculate goals
   const isPrimePartner = weeklyOrders >= 60; 
   const celestialColor = isDark ? 'text-slate-300' : 'text-yellow-300';
   const celestialIcon = isDark ? getIcon('moon', 40) : getIcon('sun', 40); 
   const ordersRemaining = Math.max(0, 20 - weeklyOrders);
   const bonusProgress = Math.min(100, (weeklyOrders / 20) * 100);
 
-  // 3. FETCH ORIGINAL DETAILS FROM SUPABASE ON LOAD
+  // 🔥 1. FETCH REAL DATABASE DETAILS ON LOAD
   useEffect(() => {
     const fetchDriverStats = async () => {
-      if (!regData?.mobile) return; // Ensure we have the driver's mobile to search by
+      if (!regData?.mobile) return; 
 
       const { data, error } = await supabase
-        .from('driver_details') // Search your driver table
-        .select('today_orders, today_earnings, weekly_orders') // Fetch these specific columns
-        .eq('mobile', regData.mobile) // Match it to the logged-in driver
+        .from('driver_details') 
+        .select('*') 
+        .eq('mobile_number', regData.mobile) 
         .single();
 
       if (data && !error) {
-        // Update the screen with the original Supabase data!
         setTodayStats({ 
             orders: data.today_orders || 0, 
             earnings: data.today_earnings || 0, 
             onlineMinutes: 0 
         });
         setWeeklyOrders(data.weekly_orders || 0);
+        setDriverVehicle(data.vehicle_type || ""); 
+        setDriverName(data.full_name || "Partner"); 
       }
     };
 
@@ -267,7 +272,7 @@ export default function HomeSection({ t, regData }) {
   useEffect(() => {
     if (isDark) document.documentElement.classList.add("dark");
     else document.documentElement.classList.remove("dark");
-  }, []);
+  }, [isDark]);
 
   const changeLanguage = (lang) => {
       setCurrentLang(lang);
@@ -293,14 +298,8 @@ export default function HomeSection({ t, regData }) {
 
     const x = event.clientX;
     const y = event.clientY;
-    const endRadius = Math.hypot(
-      Math.max(x, window.innerWidth - x),
-      Math.max(y, window.innerHeight - y)
-    );
-
-    const transition = document.startViewTransition(() => {
-      updateDOM(); 
-    });
+    const endRadius = Math.hypot(Math.max(x, window.innerWidth - x), Math.max(y, window.innerHeight - y));
+    const transition = document.startViewTransition(() => { updateDOM(); });
 
     transition.ready.then(() => {
       document.documentElement.animate(
@@ -310,31 +309,23 @@ export default function HomeSection({ t, regData }) {
     });
   };
 
-  // 🔥 UPDATED: SUPABASE LOGIC (VEHICLE MATCHING & NULL STATUS) 🔥
+  // 🔥 2. SUPABASE LOGIC
   useEffect(() => {
     let orderSubscription;
 
     const fetchPendingOrders = async () => {
-        // Fetch both 'Pending' and NULL/Empty status orders
         const { data, error } = await supabase
           .from('orders')
           .select('*')
           .or('status.eq.Pending,status.is.null');
           
         if (data && !error) {
-            const myVehicle = (regData?.vehicleType || "").toLowerCase().trim();
+            const myVehicle = driverVehicle.toLowerCase().trim();
             
-            // Apply Robust Vehicle Filtering Logic exactly like HTML
             const relevantOrders = data.filter(order => {
                 const orderVehicle = (order.vehicle_type || "").toLowerCase().trim();
-                
-                // CASE A: Universal Order
                 if (!orderVehicle || orderVehicle === 'any' || orderVehicle === 'all') return true;
-                
-                // CASE B: Safety Check
                 if (!myVehicle) return false;
-                
-                // CASE C: Exact Match
                 return orderVehicle === myVehicle;
             });
             
@@ -351,27 +342,21 @@ export default function HomeSection({ t, regData }) {
           const newOrder = payload.new;
           const status = (newOrder.status || "").toLowerCase().trim();
           
-          // 1. STATUS CHECK: Ensure order is strictly NEW (null/empty) OR 'pending'
           if (status === '' || status === 'pending') {
-              
-              // 2. VEHICLE MATCH CHECK
-              const myVehicle = (regData?.vehicleType || "").toLowerCase().trim();
+              const myVehicle = driverVehicle.toLowerCase().trim();
               const orderVehicle = (newOrder.vehicle_type || "").toLowerCase().trim();
 
               let isMatch = false;
 
               if (!orderVehicle || orderVehicle === 'any' || orderVehicle === 'all') {
-                  isMatch = true; // Universal
+                  isMatch = true; 
               } else if (myVehicle && orderVehicle === myVehicle) {
-                  isMatch = true; // Exact match
+                  isMatch = true; 
               }
 
-              // 3. IF IT MATCHES, TRIGGER NOTIFICATION!
               if (isMatch) {
                   setRingingOrder(newOrder); 
                   setOrders(prev => [...prev, newOrder]); 
-              } else {
-                  console.log(`❌ Order Skipped: Requires ${orderVehicle}, You are ${myVehicle}`);
               }
           }
         })
@@ -384,10 +369,19 @@ export default function HomeSection({ t, regData }) {
     return () => {
       if (orderSubscription) supabase.removeChannel(orderSubscription);
     };
-  }, [isOnline, regData?.vehicleType]); // Dependent on vehicle type so it updates if changed
+  }, [isOnline, driverVehicle]);
 
   const toggleOnline = () => {
-    setIsOnline(!isOnline);
+    if (isOnline) {
+        const confirmOffline = window.confirm("Are you sure you want to go offline? You will stop receiving new orders.");
+        if (confirmOffline) {
+            setIsOnline(false);
+            localStorage.setItem("isOnline", "false");
+        }
+    } else {
+        setIsOnline(true);
+        localStorage.setItem("isOnline", "true");
+    }
   };
 
   const acceptOrder = async (id) => {
@@ -396,7 +390,7 @@ export default function HomeSection({ t, regData }) {
     
     await supabase
       .from('orders')
-      .update({ status: 'Accepted', driver_name: regData.fullName, driver_number: regData.mobile })
+      .update({ status: 'Accepted', driver_name: driverName, driver_number: regData.mobile }) 
       .eq('id', id);
       
     setOrders(prev => prev.filter(o => o.id !== id));
@@ -408,9 +402,12 @@ export default function HomeSection({ t, regData }) {
     setOrders(prev => prev.filter(o => o.id !== id));
   };
 
+  // 🔥 FIX: NOW SWITCHES TO THE ORDERS TAB IMMEDIATELY!
   const handleGoToLocation = () => {
       setNavigatingOrder(null);
-      alert('Navigation started! 🗺️ Please switch to the Trips tab to view your route.');
+      if (setActiveTab) {
+          setActiveTab('orders'); 
+      }
   };
 
   return (
@@ -530,7 +527,7 @@ export default function HomeSection({ t, regData }) {
           <div className="flex items-center gap-3">
             <div className="w-8 h-8 bg-gradient-to-br from-brand-400 to-brand-600 rounded-lg flex items-center justify-center shadow-lg text-white font-black text-xs transform rotate-3">QC</div>
             <div>
-              <h1 className="font-bold text-slate-800 dark:text-white leading-none text-sm">Hi, {(regData?.fullName || "Partner").split(" ")[0]}</h1>
+              <h1 className="font-bold text-slate-800 dark:text-white leading-none text-sm">Hi, {driverName.split(" ")[0]}</h1>
               <div className="flex items-center gap-1 mt-1">
                 <span className={`w-2 h-2 rounded-full ${isOnline ? "bg-green-500 animate-pulse" : "bg-slate-400"}`} />
                 <span className="text-[10px] font-medium text-slate-500 dark:text-slate-400 uppercase">{isOnline ? "ONLINE" : "OFFLINE"}</span>
@@ -683,7 +680,7 @@ export default function HomeSection({ t, regData }) {
             
             {/* 3. SURYA WALLPAPER */}
             <div className=" margin: '0' rounded-3xl  text-white shadow-xl">
-                <img src="https://th.bing.com/th/id/R.e7d3424217ab8a605c53806b52225001?rik=6BCDskidlZlvKA&riu=http%3a%2f%2fgetwallpapers.com%2fwallpaper%2ffull%2f6%2f4%2f6%2f697414-download-free-surya-hd-wallpaper-2018-1920x1080-meizu.jpg&ehk=niLsJKFrcuiZDD2GiiKSiDLv6cFjz7sUsjNpzqgCSfU%3d&risl=&pid=ImgRaw&r=0" style={{height :"100%" , width: '100%' , borderRadius: '1.5rem'}} />
+                <img src="https://th.bing.com/th/id/R.e7d3424217ab8a605c53806b52225001?rik=6BCDskidlZlvKA&riu=http%3a%2f%2fgetwallpapers.com%2fwallpaper%2ffull%2f6%2f4%2f6%2f697414-download-free-surya-hd-wallpaper-2018-1920x1080-meizu.jpg&ehk=niLsJKFrcuiZDD2GiiKSiDLv6cFjz7sUsjNpzqgCSfU%3d&risl=&pid=ImgRaw&r=0" style={{height :"100%" , width: '100%' , borderRadius: '1.5rem'}} alt="banner" />
             </div>
         </div>
     </>

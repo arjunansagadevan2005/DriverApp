@@ -14,6 +14,8 @@ export default function ProfileSection({ t, setView, regData = {} }) {
     // Performance Tab State
     const [perfPeriod, setPerfPeriod] = useState('daily');
 
+    const [leaderboard, setLeaderboard] = useState([]);
+
     // Notification Toggles State
     const [notifSettings, setNotifSettings] = useState({
         newOrders: true, earnings: true, promotions: true, updates: true
@@ -35,32 +37,91 @@ export default function ProfileSection({ t, setView, regData = {} }) {
         vehicleNumber: ""
     });
 
+    useEffect(() => {
+        const fetchProfileData = async () => {
+            if (!regData?.mobile) return;
+
+            // Fetch My Profile
+            const { data, error } = await supabase
+                .from('driver_details') 
+                .select('*')
+                .eq('mobile', regData.mobile)
+                .single();
+
+            // 🔥 NEW: Fetch Leaderboard (Top 5 Drivers by Today's Earnings)
+            const { data: topDriversData } = await supabase
+                .from('driver_details')
+                .select('full_name, mobile, today_earnings, today_orders')
+                .order('today_earnings', { ascending: false })
+                .limit(5);
+
+            if (data && !error) {
+                setDbData(prev => ({
+                    todayOrders: data.today_orders ?? data.todayOrders ?? 0,
+                    todayEarnings: data.today_earnings ?? data.todayEarnings ?? 0,
+                    weeklyOrders: data.weekly_orders ?? data.weeklyOrders ?? 0,
+                    walletBalance: data.wallet_balance ?? data.walletBalance ?? 0,
+                    referrals: data.referrals ?? 0,
+                    referralCode: data.referral_code ?? data.referralCode ?? "NONE",
+                    fullName: data.full_name ?? data.fullName ?? prev.fullName,
+                    driverId: data.driver_id ?? data.driverId ?? prev.driverId,
+                    bankAccount: data.bank_account ?? data.bankAccount ?? prev.bankAccount,
+                    ifscCode: data.ifsc_code ?? data.ifscCode ?? prev.ifscCode,
+                    vehicleType: data.vehicle_type ?? data.vehicleType ?? prev.vehicleType,
+                    vehicleNumber: data.vehicle_number ?? data.vehicleNumber ?? prev.vehicleNumber,
+                    vehicleWeight: data.vehicle_weight ?? data.vehicleWeight ?? prev.vehicleWeight
+                }));
+            }
+
+            // 🔥 NEW: Format Leaderboard Data
+            if (topDriversData) {
+                const formattedLeaderboard = topDriversData.map((d, index) => ({
+                    name: d.mobile === regData.mobile ? 'You' : (d.full_name || 'Partner'),
+                    earnings: d.today_earnings || 0,
+                    trips: d.today_orders || 0,
+                    rank: index + 1,
+                    isMe: d.mobile === regData.mobile
+                }));
+                setLeaderboard(formattedLeaderboard);
+            }
+        };
+
+        fetchProfileData();
+    }, [regData]);
+
+    // 🔥 2. FETCH ORIGINAL DETAILS FROM SUPABASE
     // 🔥 2. FETCH ORIGINAL DETAILS FROM SUPABASE
     useEffect(() => {
         const fetchProfileData = async () => {
             if (!regData?.mobile) return;
 
+            // We use '*' to grab everything safely without crashing if a stats column is missing
             const { data, error } = await supabase
-                .from('driver_details') // Ensure this matches your table name
-                .select('today_orders, today_earnings, weekly_orders, wallet_balance, referrals, referral_code, full_name, driver_id, bank_account, ifsc_code, vehicle_type, vehicle_number')
-                .eq('mobile', regData.mobile)
+                .from('driver_details') 
+                .select('*')
+                .eq('mobile_number', regData.mobile) // 🔥 FIX 1: Matches your DB 'mobile_number'
                 .single();
 
             if (data && !error) {
                 setDbData({
+                    // 🔥 FIX 2: Map exact DB column names to the React state
+                    fullName: data.full_name || "Partner",
+                    driverId: data.driver_id || "PENDING",
+                    bankAccount: data.bank_account_number || "", // Exact match to your DB
+                    ifscCode: data.ifsc_code || "",
+                    vehicleType: data.vehicle_type || "Not Set",
+                    vehicleNumber: data.vehicle_number || "N/A",
+                    
+                    // Stats (Defaults to 0 if you haven't added these columns to your table yet)
                     todayOrders: data.today_orders || 0,
                     todayEarnings: data.today_earnings || 0,
                     weeklyOrders: data.weekly_orders || 0,
                     walletBalance: data.wallet_balance || 0,
                     referrals: data.referrals || 0,
-                    referralCode: data.referral_code || "NONE",
-                    fullName: data.full_name || "Partner",
-                    driverId: data.driver_id || "PENDING",
-                    bankAccount: data.bank_account || "",
-                    ifscCode: data.ifsc_code || "",
-                    vehicleType: data.vehicle_type || "Not Set",
-                    vehicleNumber: data.vehicle_number || "N/A"
+                    referralCode: data.referral_code || "NONE"
                 });
+            } else if (error) {
+                console.error("Error fetching driver details:", error.message);
             }
         };
 
@@ -289,36 +350,39 @@ export default function ProfileSection({ t, setView, regData = {} }) {
                     <div className="grid grid-cols-3 gap-2">
                         <div className="bg-amber-50 dark:bg-amber-900/20 rounded-xl p-3 border border-amber-200 dark:border-amber-800">
                             <p className="text-[10px] text-amber-700 dark:text-amber-400 mb-1 font-bold uppercase">Avg/Trip</p>
-                            <p className="text-lg font-black text-amber-800 dark:text-amber-300">₹171</p>
+                            <p className="text-lg font-black text-amber-800 dark:text-amber-300">
+                                {/* 🔥 Dynamically calculates real average based on earnings & trips */}
+                                ₹{dbData.todayOrders > 0 ? (dbData.todayEarnings / dbData.todayOrders).toFixed(0) : 0}
+                            </p>
                         </div>
                         <div className="bg-rose-50 dark:bg-rose-900/20 rounded-xl p-3 border border-rose-200 dark:border-rose-800">
                             <p className="text-[10px] text-rose-700 dark:text-rose-400 mb-1 font-bold uppercase">Distance</p>
-                            <p className="text-lg font-black text-rose-800 dark:text-rose-300">124km</p>
+                            <p className="text-lg font-black text-rose-800 dark:text-rose-300">
+                                {/* Dynamic placeholder based on trips */}
+                                {dbData.todayOrders * 4}km
+                            </p>
                         </div>
                         <div className="bg-sky-50 dark:bg-sky-900/20 rounded-xl p-3 border border-sky-200 dark:border-sky-800">
                             <p className="text-[10px] text-sky-700 dark:text-sky-400 mb-1 font-bold uppercase">Hours</p>
-                            <p className="text-lg font-black text-sky-800 dark:text-sky-300">32hrs</p>
+                            <p className="text-lg font-black text-sky-800 dark:text-sky-300">
+                                {/* Dynamic placeholder based on trips */}
+                                {(dbData.todayOrders * 0.5).toFixed(1)}hrs
+                            </p>
                         </div>
                     </div>
                 </div>
             );
         }
         else if (activeModal === 'leaderboard') {
-            const topDrivers = [
-                { name: 'Rajesh Kumar', earnings: 15420, trips: 87, rank: 1 },
-                { name: 'Vikram Singh', earnings: 14850, trips: 82, rank: 2 },
-                { name: 'You', earnings: dbData.todayEarnings, trips: dbData.todayOrders, rank: 8 },
-                { name: 'Arjun Patel', earnings: 12300, trips: 71, rank: 3 },
-                { name: 'Suresh Reddy', earnings: 11900, trips: 68, rank: 4 }
-            ];
             content = (
                 <div>
                     <h2 className="text-xl font-bold mb-4 dark:text-white flex items-center gap-2">
                         <span dangerouslySetInnerHTML={{ __html: getIcon('award', 24, 'text-yellow-600') }} /> {t('leaderboard')}
                     </h2>
                     <div className="space-y-2 max-h-96 overflow-y-auto pr-2">
-                        {topDrivers.map(driver => (
-                            <div key={driver.rank} className={`p-4 rounded-xl ${driver.name === 'You' ? 'bg-brand-50 dark:bg-brand-900/20 border-2 border-brand-500' : 'bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700'} flex items-center gap-3`}>
+                        {/* 🔥 USING REAL DB LEADERBOARD NOW */}
+                        {leaderboard.length > 0 ? leaderboard.map(driver => (
+                            <div key={driver.rank} className={`p-4 rounded-xl ${driver.isMe ? 'bg-brand-50 dark:bg-brand-900/20 border-2 border-brand-500' : 'bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700'} flex items-center gap-3`}>
                                 <div className={`w-10 h-10 rounded-full ${driver.rank <= 3 ? 'bg-gradient-to-br from-yellow-400 to-yellow-600 text-white' : 'bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-300'} flex items-center justify-center font-black`}>
                                     {driver.rank <= 3 ? <span dangerouslySetInnerHTML={{ __html: getIcon('trophy', 20) }} /> : driver.rank}
                                 </div>
@@ -328,11 +392,14 @@ export default function ProfileSection({ t, setView, regData = {} }) {
                                 </div>
                                 <div className="text-sm font-bold text-slate-500 dark:text-slate-400">#{driver.rank}</div>
                             </div>
-                        ))}
+                        )) : (
+                            <p className="text-center text-slate-500 py-10">Loading Leaderboard...</p>
+                        )}
                     </div>
                 </div>
             );
         }
+
         else if (activeModal === 'notifications') {
             const toggleKey = (k) => setNotifSettings(prev => ({...prev, [k]: !prev[k]}));
             content = (
