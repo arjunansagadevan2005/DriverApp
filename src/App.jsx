@@ -84,57 +84,62 @@ function App() {
   };
 
   const handleRegister = async (e) => {
-  e.preventDefault();
-  setLoading(true);
+    e.preventDefault();
+    setLoading(true);
 
-  try {
-    const upload = async (file, path) => {
-      if (!file) return null;
-      const fileName = `${path}/${Date.now()}_${file.name}`;
-      const { error } = await supabase.storage.from('driver_document').upload(fileName, file);
-      if (error) throw error;
-      return supabase.storage.from('driver_document').getPublicUrl(fileName).data.publicUrl;
-    };
+    try {
+        // Helper function to upload files to Supabase Storage
+        const uploadFile = async (file, fileNamePrefix) => {
+            if (!file) return null;
+            const fileExt = file.name.split('.').pop();
+            const fileName = `${fileNamePrefix}-${regData.mobile}-${Date.now()}.${fileExt}`;
+            
+            // 🔥 FIXED: Pointing to your 'driver_document' bucket
+            const { data, error } = await supabase.storage
+                .from('driver_document')
+                .upload(fileName, file);
 
-    // Parallel File Uploads
-    const [avatar, aadhar, pan, rc, license] = await Promise.all([
-      upload(regData.avatarFile, 'avatars'),
-      upload(regData.aadharFile, 'aadhar'),
-      upload(regData.panFile, 'pan'),
-      upload(regData.rcFile, 'rc'),
-      upload(regData.licenseFile, 'license')
-    ]);
+            if (error) throw error;
 
-    // Insert to driver_details using exact column names from your SQL
-    const { error } = await supabase.from('driver_details').insert([{
-      full_name: regData.fullName,
-      mobile_number: regData.mobile,
-      avatar_url: avatar,
-      vehicle_type: regData.vehicleType,
-      vehicle_number: regData.vehicleNumber,
-      preferred_zone: regData.preferredZone,
-      tshirt_size: regData.tshirtSize,
-      blood_group: regData.bloodGroup,
-      emergency_contact: regData.emergencyContact,
-      bank_account_number: regData.bankAccount,
-      ifsc_code: regData.ifscCode,
-      account_holder_name: regData.accountHolder,
-      aadhar_url: aadhar,
-      pan_url: pan,
-      rc_url: rc,
-      license_url: license,
-      is_approved: false
-    }]);
+            // 🔥 FIXED: Fetching the URL from 'driver_document'
+            const { data: urlData } = supabase.storage.from('driver_document').getPublicUrl(fileName);
+            return urlData.publicUrl;
+        };
 
-    if (error) throw error;
-    setView('dashboard');
+        // 1. Upload all documents concurrently for speed
+        const [avatarUrl, aadharUrl, licenseUrl, rcUrl] = await Promise.all([
+            uploadFile(regData.avatarFile, 'avatar'),
+            uploadFile(regData.aadharFile, 'aadhar'),
+            uploadFile(regData.licenseFile, 'license'),
+            uploadFile(regData.rcFile, 'rc')
+        ]);
 
-  } catch (err) {
-    alert("Error: " + err.message);
-  } finally {
-    setLoading(false);
-  }
-};
+        // 2. Save everything (including the new URLs) to your database
+        const { error } = await supabase.from('driver_details').insert([{
+            mobile_number: regData.mobile,
+            full_name: regData.fullName,
+            vehicle_type: regData.vehicleType,
+            vehicle_number: regData.vehicleNumber,
+            bank_account: regData.bankAccount,
+            ifsc_code: regData.ifscCode,
+            avatar_url: avatarUrl,
+            aadhar_url: aadharUrl,
+            license_url: licenseUrl,
+            rc_url: rcUrl,
+            status: 'Pending Verification'
+        }]);
+
+        if (error) throw error;
+        alert("Registration Successful! Pending Admin Approval.");
+        setView('login'); // Send them to login screen
+
+    } catch (error) {
+        console.error("Upload error:", error);
+        alert("Registration failed: " + error.message);
+    } finally {
+        setLoading(false);
+    }
+  };
 
   return (
   <div className={isDark ? "dark" : ""}>

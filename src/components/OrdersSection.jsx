@@ -3,6 +3,7 @@ import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import { supabase, ICONS } from '../config';
 import ChatModal from './ChatModal';
+import useDriverGPS from './useDriverGPS';
 
 const getIcon = (name, size = 24, classes = '') => {
     return `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="${classes}">${ICONS[name] || ''}</svg>`;
@@ -75,21 +76,29 @@ function NavigationModal({ order, onClose, onGoToLocation }) {
 // ═══════════════════════════════════════════════════════════════════════════
 export default function OrdersSection({ t, regData }) {
   const [tab, setTab] = useState('new');
-  const [activeTrip, setActiveTrip] = useState(null);
+  const [activeTrip, setActiveTrip] = useState(() => {
+      const savedTrip = localStorage.getItem('activeTrip');
+      if (savedTrip) {
+          localStorage.removeItem('activeTrip'); 
+          return JSON.parse(savedTrip); 
+      }
+      return null;
+  });
   
-  // 🔥 NEW: Controls the "Go To Location" Modal
   const [navigatingOrder, setNavigatingOrder] = useState(null); 
-  
-  const [driverLocation, setDriverLocation] = useState([13.0827, 80.2707]);
+  const { location: driverLocation, gpsError } = useDriverGPS(regData?.mobile, true);
+  const [otpInput, setOtpInput] = useState('');
+
   const [orders, setOrders] = useState([]);
   const [history, setHistory] = useState([]);
   const [isLoading, setIsLoading] = useState(false);
   const [isChatOpen, setIsChatOpen] = useState(false);
   
   const [dbVehicle, setDbVehicle] = useState("");
+  
   const mapRef = useRef(null);
+  const mapContainerRef = useRef(null);
 
-  // 1. Fetch real vehicle type
   useEffect(() => {
       const fetchVehicle = async () => {
           if (!regData?.mobile) return;
@@ -103,7 +112,6 @@ export default function OrdersSection({ t, regData }) {
       fetchVehicle();
   }, [regData?.mobile]);
 
-  // 2. FETCH ORDERS BASED ON TAB
   useEffect(() => {
     const fetchOrders = async () => {
       setIsLoading(true);
@@ -117,7 +125,6 @@ export default function OrdersSection({ t, regData }) {
 
         if (data && !error) {
            const myVehicle = (dbVehicle || regData?.vehicleType || "").toLowerCase().trim();
-           
            const filtered = data.filter(o => {
                const oVehicle = (o.vehicle_type || "").toLowerCase().trim();
                return !oVehicle || oVehicle === 'any' || oVehicle === 'all' || oVehicle === myVehicle;
@@ -152,7 +159,6 @@ export default function OrdersSection({ t, regData }) {
     return () => supabase.removeChannel(orderSub);
   }, [tab, regData?.mobile, dbVehicle]);
 
-  // 3. AUTO-RESUME ONGOING TRIPS (Only if not currently in modal flow)
   useEffect(() => {
     const fetchOngoingTrip = async () => {
         if (!regData?.mobile) return;
@@ -172,134 +178,186 @@ export default function OrdersSection({ t, regData }) {
 
   // --- LEAFLET MAP LOGIC ---
   useEffect(() => {
-    // We only load the map if activeTrip is confirmed and DOM is ready
-    if (!activeTrip) return;
+    if (!activeTrip || !mapContainerRef.current) return;
+
+    if (mapRef.current) {
+        mapRef.current.remove();
+        mapRef.current = null;
+    }
+
+    const map = L.map(mapContainerRef.current, { zoomControl: false }).setView(driverLocation, 13);
+    L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', { maxZoom: 19 }).addTo(map);
+    mapRef.current = map;
+
+    const createIcon = (iconName, color) => L.divIcon({
+        className: 'custom-marker',
+        html: `<div class="marker-pin" style="background-color:${color}"><div class="marker-icon text-${color}-600">${getIcon(iconName, 16, 'text-black')}</div></div>`,
+        iconSize: [40, 40], iconAnchor: [20, 42]
+    });
+    const driverIcon = L.divIcon({ className: 'custom-marker', html: `<div class="driver-pulse-marker"></div>`, iconSize: [24, 24], iconAnchor: [12, 12] });
+
+    L.marker(driverLocation, {icon: driverIcon, zIndexOffset: 1000}).addTo(map);
     
-    // Tiny delay to ensure React has painted the <div id="trip-map"> into the DOM
-    const initTimer = setTimeout(() => {
-        const mapId = 'trip-map';
-        const mapElement = document.getElementById(mapId);
-        if (!mapElement) return;
-
-        if (mapRef.current) {
-            mapRef.current.remove();
-            mapRef.current = null;
+    const extractCoords = (order, type) => {
+        if (type === 'pickup') {
+            if (order.pickup_coords) return order.pickup_coords;
+            if (order.pickup_latitude && order.pickup_longitude) return [parseFloat(order.pickup_latitude), parseFloat(order.pickup_longitude)];
+            return [13.0827, 80.2707];
+        } else {
+            if (order.drop_coords) return order.drop_coords;
+            if (order.delivery_latitude && order.delivery_longitude) return [parseFloat(order.delivery_latitude), parseFloat(order.delivery_longitude)];
+            if (order.client_latitude && order.client_longitude) return [parseFloat(order.client_latitude), parseFloat(order.client_longitude)];
+            return [13.1000, 80.2600];
         }
+    };
 
-        const map = L.map(mapId, { zoomControl: false }).setView(driverLocation, 13);
-        L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', { maxZoom: 19 }).addTo(map);
-        mapRef.current = map;
+    const pickupCoords = extractCoords(activeTrip, 'pickup');
+    const dropCoords = extractCoords(activeTrip, 'drop');
 
-        const createIcon = (iconName, color) => L.divIcon({
-            className: 'custom-marker',
-            html: `<div class="marker-pin" style="background-color:${color}"><div class="marker-icon text-${color}-600">${getIcon(iconName, 16, 'text-black')}</div></div>`,
-            iconSize: [40, 40], iconAnchor: [20, 42]
-        });
-        const driverIcon = L.divIcon({ className: 'custom-marker', html: `<div class="driver-pulse-marker"></div>`, iconSize: [24, 24], iconAnchor: [12, 12] });
+    // --- REAL ROAD ROUTING API (VEHICLE SPECIFIC) ---
+    const fetchRoute = async (startCoords, endCoords, color, dashArray) => {
+        try {
+            let routingProfile = 'driving-car'; 
+            const vType = (regData?.vehicleType || dbVehicle || "").toLowerCase();
+            
+            if (vType === 'truck' || vType === 'tempo') {
+                routingProfile = 'driving-hgv'; 
+            } else if (vType === '2wheeler') {
+                routingProfile = 'cycling-electric'; 
+            }
 
-        L.marker(driverLocation, {icon: driverIcon, zIndexOffset: 1000}).addTo(map);
-        
-        // --- ROBUST COORDINATE EXTRACTION ---
-        const extractCoords = (order, type) => {
-            if (type === 'pickup') {
-                if (order.pickup_coords) return order.pickup_coords;
-                if (order.pickup_latitude && order.pickup_longitude) return [parseFloat(order.pickup_latitude), parseFloat(order.pickup_longitude)];
-                return [13.0827, 80.2707];
+            const response = await fetch(`https://api.openrouteservice.org/v2/directions/${routingProfile}`, {
+                method: "POST",
+                headers: {
+                    "Authorization": "eyJvcmciOiI1YjNjZTM1OTc4NTExMTAwMDFjZjYyNDgiLCJpZCI6IjcwNjVlNGViMDg5YTRlNWNhODY1ZmU2NDI3MjUyMWZkIiwiaCI6Im11cm11cjY0In0=",
+                    "Content-Type": "application/json"
+                },
+                body: JSON.stringify({ coordinates: [[startCoords[1], startCoords[0]], [endCoords[1], endCoords[0]]] })
+            });
+
+            const data = await response.json();
+            if (data.features && data.features[0]) {
+                const coords = data.features[0].geometry.coordinates;
+                const latLngs = coords.map(c => [c[1], c[0]]); 
+                L.polyline(latLngs, { color: color, weight: 5, opacity: 0.8, dashArray: dashArray }).addTo(map);
             } else {
-                if (order.drop_coords) return order.drop_coords;
-                if (order.delivery_latitude && order.delivery_longitude) return [parseFloat(order.delivery_latitude), parseFloat(order.delivery_longitude)];
-                if (order.client_latitude && order.client_longitude) return [parseFloat(order.client_latitude), parseFloat(order.client_longitude)];
-                return [13.1000, 80.2600];
+                throw new Error("No route found");
             }
-        };
-
-        const pickupCoords = extractCoords(activeTrip, 'pickup');
-        const dropCoords = extractCoords(activeTrip, 'drop');
-
-        // --- REAL ROAD ROUTING API ---
-        const fetchRoute = async (startCoords, endCoords, color, dashArray) => {
-            try {
-                const response = await fetch("https://api.openrouteservice.org/v2/directions/driving-car", {
-                    method: "POST",
-                    headers: {
-                        "Authorization": "eyJvcmciOiI1YjNjZTM1OTc4NTExMTAwMDFjZjYyNDgiLCJpZCI6IjcwNjVlNGViMDg5YTRlNWNhODY1ZmU2NDI3MjUyMWZkIiwiaCI6Im11cm11cjY0In0=",
-                        "Content-Type": "application/json"
-                    },
-                    body: JSON.stringify({ coordinates: [[startCoords[1], startCoords[0]], [endCoords[1], endCoords[0]]] })
-                });
-
-                const data = await response.json();
-                if (data.features && data.features[0]) {
-                    const coords = data.features[0].geometry.coordinates;
-                    const latLngs = coords.map(c => [c[1], c[0]]); 
-                    L.polyline(latLngs, { color: color, weight: 5, opacity: 0.8, dashArray: dashArray }).addTo(map);
-                } else {
-                    throw new Error("No route found");
-                }
-            } catch (error) {
-                console.error('GPS Path Error:', error);
-                L.polyline([startCoords, endCoords], {color: color, weight: 4, dashArray: dashArray}).addTo(map);
-            }
-        };
-
-        if (activeTrip.step === 0) { 
-            L.marker(pickupCoords, {icon: createIcon('package', '#f59e0b')}).addTo(map);
-            fetchRoute(driverLocation, pickupCoords, '#06b6d4', '10, 10');
-            map.fitBounds([driverLocation, pickupCoords], {padding: [50, 50]});
-        } else { 
-            L.marker(dropCoords, {icon: createIcon('home', '#10b981')}).addTo(map);
-            fetchRoute(driverLocation, dropCoords, '#06b6d4', null);
-            map.fitBounds([driverLocation, dropCoords], {padding: [50, 50]});
+        } catch (error) {
+            console.error('GPS Path Error:', error);
+            L.polyline([startCoords, endCoords], {color: color, weight: 4, dashArray: dashArray}).addTo(map);
         }
-    }, 100);
+    };
+
+    if (activeTrip.step === 0) { 
+        L.marker(pickupCoords, {icon: createIcon('package', '#f59e0b')}).addTo(map);
+        fetchRoute(driverLocation, pickupCoords, '#06b6d4', '10, 10');
+        map.fitBounds([driverLocation, pickupCoords], {padding: [50, 50]});
+    } else { 
+        L.marker(dropCoords, {icon: createIcon('home', '#10b981')}).addTo(map);
+        fetchRoute(driverLocation, dropCoords, '#06b6d4', null);
+        map.fitBounds([driverLocation, dropCoords], {padding: [50, 50]});
+    }
 
     return () => { 
-        clearTimeout(initTimer);
         if (mapRef.current) { mapRef.current.remove(); mapRef.current = null; } 
     };
   }, [activeTrip, driverLocation]);
 
-
-  // 🔥 MODIFIED: ACCEPT ORDER NO LONGER OPENS MAP INSTANTLY
   const handleAccept = async (order) => {
       setOrders(prev => prev.filter(o => o.id !== order.id));
-      
-      // Update Database
       await supabase.from('orders')
-        .update({ 
-            status: 'Accepted', 
-            driver_name: regData.fullName || 'Partner', 
-            driver_number: regData.mobile 
-        })
+        .update({ status: 'Accepted', driver_name: regData.fullName || 'Partner', driver_number: regData.mobile })
         .eq('id', order.id);
-
-      // TRIGGER THE "GO TO LOCATION" MODAL INSTEAD OF THE MAP!
       setNavigatingOrder(order);
   };
 
-  // 🔥 NEW: THIS RUNS WHEN THEY CLICK "GO TO LOCATION" ON THE MODAL
   const handleGoToLocation = () => {
       const order = navigatingOrder;
-      setNavigatingOrder(null); // Close modal
-      setActiveTrip({ ...order, step: 0 }); // Render Map
+      setNavigatingOrder(null); 
+      setActiveTrip({ ...order, step: 0 }); 
   };
 
+  // 🔥 Opens the Native Google Maps App
+  const handleStartVoiceNavigation = () => {
+      const extractCoords = (order, type) => {
+          if (type === 'pickup') {
+              if (order.pickup_coords) return order.pickup_coords;
+              if (order.pickup_latitude && order.pickup_longitude) return [parseFloat(order.pickup_latitude), parseFloat(order.pickup_longitude)];
+              return [13.0827, 80.2707];
+          } else {
+              if (order.drop_coords) return order.drop_coords;
+              if (order.delivery_latitude && order.delivery_longitude) return [parseFloat(order.delivery_latitude), parseFloat(order.delivery_longitude)];
+              if (order.client_latitude && order.client_longitude) return [parseFloat(order.client_latitude), parseFloat(order.client_longitude)];
+              return [13.1000, 80.2600];
+          }
+      };
+
+      const targetCoords = activeTrip.step === 0 
+          ? extractCoords(activeTrip, 'pickup') 
+          : extractCoords(activeTrip, 'drop');
+      
+      const vType = (regData?.vehicleType || dbVehicle || "").toLowerCase();
+      let travelMode = 'driving'; 
+      if (vType === '2wheeler') {
+          travelMode = 'two-wheeler'; 
+      }
+
+      const gmapsUrl = `https://www.google.com/maps/dir/?api=1&destination=${targetCoords[0]},${targetCoords[1]}&travelmode=${travelMode}`;
+      window.open(gmapsUrl, '_blank');
+  };
+
+  // 🔥 REAL-WORLD VALIDATION: Prevent clicking "Arrived" if too far away!
   const handleAdvanceTrip = async () => {
       if (activeTrip.step === 0) {
+          
+          // 1. Get the actual Pickup Coordinates safely
+          let pLat = 13.0827, pLng = 80.2707;
+          if (activeTrip.pickup_latitude && activeTrip.pickup_longitude) {
+              pLat = parseFloat(activeTrip.pickup_latitude);
+              pLng = parseFloat(activeTrip.pickup_longitude);
+          } else if (activeTrip.pickup_coords) {
+              pLat = activeTrip.pickup_coords[0];
+              pLng = activeTrip.pickup_coords[1];
+          }
+
+          // 2. Check the distance using Leaflet math
+          const distanceInMeters = L.latLng(driverLocation).distanceTo(L.latLng([pLat, pLng]));
+
+          // 3. Block the driver if they are more than 200 meters away
+          if (distanceInMeters > 200) {
+              alert(`You are still ${Math.round(distanceInMeters)} meters away. Please reach the pickup location before marking as arrived.`);
+              return; // STOP execution here. Do not switch the route.
+          }
+
+          // 4. If they are close enough, switch to the Delivery Route
           setActiveTrip({ ...activeTrip, step: 1 }); 
-      } else {
-          await supabase.from('orders').update({ status: 'Completed' }).eq('id', activeTrip.id);
-          setActiveTrip(null);
-          alert('Delivery Completed! Earnings added to wallet.');
-          setTab('history'); 
+          
+      } else if (activeTrip.step === 1) {
+          const generatedOtp = Math.floor(1000 + Math.random() * 9000).toString();
+          await supabase.from('orders').update({ delivery_otp: generatedOtp }).eq('id', activeTrip.id);
+          alert(`[SIMULATED SMS TO CUSTOMER] Your delivery OTP is: ${generatedOtp}`);
+          setActiveTrip({ ...activeTrip, step: 2, correctOtp: generatedOtp });
       }
   };
 
-  // --- RENDER MAP VIEW IF ACTIVE ---
+  const handleVerifyOtp = async () => {
+      if (otpInput === activeTrip.correctOtp) {
+          await supabase.from('orders').update({ status: 'Completed' }).eq('id', activeTrip.id);
+          setActiveTrip(null);
+          setOtpInput(''); 
+          alert('Delivery Completed! Earnings added to wallet.');
+          setTab('history'); 
+      } else {
+          alert('Invalid OTP. Please ask the customer and try again.');
+          setOtpInput(''); 
+      }
+  };
+
   if (activeTrip) {
       return (
           <div className="absolute inset-0 flex flex-col h-[calc(100vh-64px)] z-40 bg-slate-100 dark:bg-dark-bg fade-in">
-              <div id="trip-map" className="flex-1 w-full z-0"></div>
+              <div ref={mapContainerRef} className="flex-1 w-full z-0"></div>
               
               <div className="absolute top-safe pt-4 left-4 right-4 z-30 flex justify-between">
                   <button onClick={() => setActiveTrip(null)} className="w-10 h-10 bg-white dark:bg-slate-800 rounded-full shadow-lg flex items-center justify-center text-slate-700 dark:text-slate-300 active:scale-95 transition-transform">
@@ -312,32 +370,72 @@ export default function OrdersSection({ t, regData }) {
               
               <div className="bg-white dark:bg-dark-surface rounded-t-3xl shadow-[0_-8px_30px_rgba(0,0,0,0.12)] p-6 z-30 slide-up border-t border-slate-100 dark:border-dark-border">
                   <div className="w-12 h-1.5 bg-slate-200 dark:bg-slate-700 rounded-full mx-auto mb-5"></div>
-                  <div className="flex justify-between items-start mb-6">
-                      <div>
-                          <p className="text-xs font-bold text-brand-600 uppercase tracking-widest mb-1">
-                              {activeTrip.step === 0 ? 'Navigating to Pickup' : 'Navigating to Dropoff'}
-                          </p>
-                          <h2 className="text-2xl font-black text-slate-900 dark:text-white mb-1">
-                              On Route <span className="text-lg font-medium text-slate-400">({activeTrip.distance || 'calculating...'})</span>
-                          </h2>
-                          <p className="text-sm text-slate-500 dark:text-slate-400 line-clamp-1">
-                              {activeTrip.step === 0 ? (activeTrip.vendor_shop_name || activeTrip.pickup_address) : (activeTrip.delivery_address || activeTrip.client_address)}
-                          </p>
-                      </div>
-                      
-                      <div className="flex gap-2">
-                          <button onClick={() => setIsChatOpen(true)} className="w-12 h-12 bg-brand-100 dark:bg-brand-900/30 rounded-full flex items-center justify-center text-brand-600 dark:text-brand-400 active:scale-95 transition-transform shadow-sm">
-                              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/></svg>
+                  
+                  {activeTrip.step < 2 ? (
+                      <>
+                          <div className="flex justify-between items-start mb-6">
+                              <div>
+                                  <p className="text-xs font-bold text-brand-600 uppercase tracking-widest mb-1">
+                                      {activeTrip.step === 0 ? 'Navigating to Pickup' : 'Navigating to Dropoff'}
+                                  </p>
+                                  <h2 className="text-2xl font-black text-slate-900 dark:text-white mb-1">
+                                      On Route <span className="text-lg font-medium text-slate-400">({activeTrip.distance || 'calculating...'})</span>
+                                  </h2>
+                                  <p className="text-sm text-slate-500 dark:text-slate-400 line-clamp-1">
+                                      {activeTrip.step === 0 ? (activeTrip.vendor_shop_name || activeTrip.pickup_address) : (activeTrip.delivery_address || activeTrip.client_address)}
+                                  </p>
+                              </div>
+                              
+                              <div className="flex gap-2">
+                                  <button onClick={() => setIsChatOpen(true)} className="w-12 h-12 bg-brand-100 dark:bg-brand-900/30 rounded-full flex items-center justify-center text-brand-600 dark:text-brand-400 active:scale-95 transition-transform shadow-sm">
+                                      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/></svg>
+                                  </button>
+                                  <button className="w-12 h-12 bg-green-100 dark:bg-green-900/30 rounded-full flex items-center justify-center text-green-600 dark:text-green-400 active:scale-95 transition-transform shadow-sm">
+                                      <span dangerouslySetInnerHTML={{ __html: getIcon('phone', 20) }} />
+                                  </button>
+                              </div>
+                          </div>
+                          
+                          {/* Start Voice Navigation Button */}
+                          <div className="grid grid-cols-1 gap-3 mb-3">
+                              <button onClick={handleStartVoiceNavigation} className="w-full py-4 rounded-2xl font-bold text-lg bg-blue-600 hover:bg-blue-700 text-white shadow-lg shadow-blue-500/30 flex items-center justify-center gap-2 active:scale-95 transition-transform">
+                                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polygon points="3 11 22 2 13 21 11 13 3 11"/></svg>
+                                  Start Navigation ↗
+                              </button>
+                          </div>
+
+                          {/* Existing Advancement Button */}
+                          <button onClick={handleAdvanceTrip} className="w-full py-4 rounded-2xl font-black text-lg border-2 border-brand-600 text-brand-600 dark:border-brand-500 dark:text-brand-400 bg-brand-50 dark:bg-brand-900/10 hover:bg-brand-100 dark:hover:bg-brand-900/30 flex items-center justify-center gap-3 active:scale-95 transition-transform">
+                              {activeTrip.step === 0 ? 'Arrived at Pickup' : 'Complete Delivery'} 
+                              <span dangerouslySetInnerHTML={{ __html: getIcon('check', 24) }} />
                           </button>
-                          <button className="w-12 h-12 bg-green-100 dark:bg-green-900/30 rounded-full flex items-center justify-center text-green-600 dark:text-green-400 active:scale-95 transition-transform shadow-sm">
-                              <span dangerouslySetInnerHTML={{ __html: getIcon('phone', 20) }} />
+                      </>
+                  ) : (
+                      <div className="text-center slide-up">
+                          <div className="w-16 h-16 bg-brand-100 dark:bg-brand-900/30 rounded-full flex items-center justify-center mx-auto mb-4 text-brand-600 dark:text-brand-400">
+                              <span dangerouslySetInnerHTML={{ __html: getIcon('key', 32) }} />
+                          </div>
+                          <h2 className="text-2xl font-black text-slate-900 dark:text-white mb-2">Enter OTP to Complete</h2>
+                          <p className="text-sm text-slate-500 dark:text-slate-400 mb-6">Ask the customer for the 4-digit code sent to their phone.</p>
+                          
+                          <input 
+                              type="number" 
+                              maxLength={4}
+                              placeholder="0000"
+                              value={otpInput}
+                              onChange={(e) => setOtpInput(e.target.value.slice(0, 4))}
+                              className="w-full max-w-[200px] mx-auto p-4 text-center text-3xl font-black tracking-[0.5em] rounded-2xl bg-slate-50 dark:bg-slate-800 border-2 border-slate-200 dark:border-slate-700 outline-none focus:border-brand-500 dark:text-white mb-6"
+                          />
+                          
+                          <button 
+                              onClick={handleVerifyOtp} 
+                              disabled={!otpInput || otpInput.length !== 4}
+                              className="w-full py-4 rounded-2xl font-black text-lg bg-green-600 hover:bg-green-700 text-white shadow-xl shadow-green-500/30 flex items-center justify-center gap-3 active:scale-95 transition-transform disabled:opacity-50 disabled:active:scale-100"
+                          >
+                              Verify & Complete
                           </button>
                       </div>
-                  </div>
-                  <button onClick={handleAdvanceTrip} className="w-full py-4 rounded-2xl font-black text-lg bg-brand-600 hover:bg-brand-700 text-white shadow-xl shadow-brand-500/30 flex items-center justify-center gap-3 active:scale-95 transition-transform">
-                      {activeTrip.step === 0 ? 'Arrived at Pickup' : 'Complete Delivery'} 
-                      <span dangerouslySetInnerHTML={{ __html: getIcon('check', 24) }} />
-                  </button>
+                  )}
               </div>
 
               <ChatModal 
@@ -352,7 +450,6 @@ export default function OrdersSection({ t, regData }) {
       );
   }
 
-  // --- RENDER LISTS VIEW ---
   const renderOrderCard = (order) => (
       <div key={order.id} className="bg-white dark:bg-dark-surface p-5 rounded-3xl border border-slate-100 dark:border-slate-700 shadow-sm relative overflow-hidden mb-4">
         <div className="flex justify-between items-start mb-4 relative z-10">
@@ -451,7 +548,6 @@ export default function OrdersSection({ t, regData }) {
         )}
       </div>
 
-      {/* 🔥 RENDERS THE MODAL WHEN ACCEPTED */}
       {navigatingOrder && (
           <NavigationModal 
               order={navigatingOrder} 
@@ -459,7 +555,6 @@ export default function OrdersSection({ t, regData }) {
               onGoToLocation={handleGoToLocation} 
           />
       )}
-
     </div>
   );
 }

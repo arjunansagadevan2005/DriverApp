@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect } from "react";
 import { supabase, ICONS } from '../config'; 
 
 function getIcon(name, size = 24, classes = "") {
@@ -87,7 +87,7 @@ function NewOrderPopup({ order, isPrime, onAccept, onDecline }) {
                                     <div className="mt-3 p-3 bg-amber-50 dark:bg-amber-900/20 border-2 border-amber-200 dark:border-amber-800 rounded-xl">
                                         <p className="text-sm font-bold text-amber-700 dark:text-amber-400 mb-1">⏳ Please Wait</p>
                                         <p className="text-xs text-amber-600 dark:text-amber-500">Normal partners must wait <span className="font-black text-lg">{timeLeft}</span> seconds</p>
-                                        <p className="text-xs text-amber-600 dark:text-amber-500 mt-1">Complete 60 orders to become PRIME! 🌟</p>
+                                        <p className="text-xs text-amber-600 dark:text-amber-500 mt-1">Complete 50 orders to become PRIME! 🌟</p>
                                     </div>
                                 )}
                                 {!isPrime && timeLeft === 0 && (
@@ -148,7 +148,7 @@ function NewOrderPopup({ order, isPrime, onAccept, onDecline }) {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-// 2. EXACT HTML NAVIGATION CONFIRMATION MODAL
+// 2. NAVIGATION CONFIRMATION MODAL
 // ═══════════════════════════════════════════════════════════════════════════
 function NavigationModal({ order, onClose, onGoToLocation }) {
     const pickupAddress = order.vendor_shop_name || order.pickup_address || 'Pickup Location';
@@ -183,14 +183,12 @@ function NavigationModal({ order, onClose, onGoToLocation }) {
                             <p className="text-sm font-semibold text-slate-800 dark:text-slate-200 leading-snug">{pickupAddress}</p>
                         </div>
                     </div>
-                    
                     <div className="flex items-center pl-4">
                         <div className="flex-1 border-t-2 border-dashed border-slate-300 dark:border-slate-600"></div>
                         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="text-slate-400 mx-2">
                             <path d="M5 12h14M12 5l7 7-7 7"/>
                         </svg>
                     </div>
-                    
                     <div className="flex items-start gap-3">
                         <div className="w-9 h-9 rounded-full bg-brand-500 flex items-center justify-center flex-shrink-0 mt-0.5">
                             {getIcon('mapPin', 18, 'text-white')}
@@ -216,33 +214,64 @@ function NavigationModal({ order, onClose, onGoToLocation }) {
 // ═══════════════════════════════════════════════════════════════════════════
 // MAIN HOME SECTION
 // ═══════════════════════════════════════════════════════════════════════════
-// 🔥 FIX: Added setActiveTab to props!
 export default function HomeSection({ t, regData, setActiveTab }) {
   const [isDark, setIsDark] = useState(() => localStorage.getItem("theme") === "true");
-  // 🔥 Remembers Online status across tabs
   const [isOnline, setIsOnline] = useState(() => localStorage.getItem("isOnline") === "true");
+  
   const [ringingOrder, setRingingOrder] = useState(null); 
   const [navigatingOrder, setNavigatingOrder] = useState(null);
-  const [orders, setOrders] = useState([]);
+
+  const [currentSlide, setCurrentSlide] = useState(0);
+  
+  const promoMedia = [
+      { type: 'image', url: 'https://th.bing.com/th/id/R.e7d3424217ab8a605c53806b52225001?rik=6BCDskidlZlvKA&riu=http%3a%2f%2fgetwallpapers.com%2fwallpaper%2ffull%2f6%2f4%2f6%2f697414-download-free-surya-hd-wallpaper-2018-1920x1080-meizu.jpg&ehk=niLsJKFrcuiZDD2GiiKSiDLv6cFjz7sUsjNpzqgCSfU%3d&risl=&pid=ImgRaw&r=0' },
+      { type: 'image', url: 'https://images.unsplash.com/photo-1611590027211-b954fd027b51?q=80&w=1000&auto=format&fit=crop' },
+      { type: 'video', url: 'https://www.w3schools.com/html/mov_bbb.mp4' }
+  ];
+
+  useEffect(() => {
+      const slideInterval = setInterval(() => {
+          setCurrentSlide((prevIndex) => (prevIndex + 1) % promoMedia.length);
+      }, 4000); 
+      return () => clearInterval(slideInterval);
+  }, [promoMedia.length]);
+
+
+  const [alerts, setAlerts] = useState([
+    { id: 'welcome', type: 'offer', title: 'Welcome to QC Logistics! 🎉', message: 'Complete your first 5 trips today to earn a ₹500 joining bonus.', time: 'Just now', read: false },
+    { id: 'system', type: 'info', title: 'Profile Approved', message: 'Your driving license and RC book have been successfully verified.', time: '2 hours ago', read: false }
+  ]);
   
   const [showNotifications, setShowNotifications] = useState(false);
   const [showLangModal, setShowLangModal] = useState(false);
   const [currentLang, setCurrentLang] = useState(() => localStorage.getItem("language") || "en");
   
-  // 🔥 ADDED REAL STATE FOR DRIVER DETAILS
   const [todayStats, setTodayStats] = useState({ orders: 0, earnings: 0, onlineMinutes: 0 });
   const [weeklyOrders, setWeeklyOrders] = useState(0);
   const [driverVehicle, setDriverVehicle] = useState(""); 
   const [driverName, setDriverName] = useState(regData?.fullName || "Partner");
 
-  // Automatically calculate goals
-  const isPrimePartner = weeklyOrders >= 60; 
-  const celestialColor = isDark ? 'text-slate-300' : 'text-yellow-300';
-  const celestialIcon = isDark ? getIcon('moon', 40) : getIcon('sun', 40); 
+  // 🔥 DAILY INCENTIVE CALCULATIONS
+  const currentOrders = todayStats.orders || 0;
+  const dailyMilestones = [
+      { target: 0, reward: 0 },
+      { target: 5, reward: 50 },
+      { target: 10, reward: 100 },
+      { target: 15, reward: 250 },
+      { target: 20, reward: 500 }
+  ];
+  const maxDailyTarget = dailyMilestones[dailyMilestones.length - 1].target;
+  const dailyProgress = Math.min(100, (currentOrders / maxDailyTarget) * 100);
+  const nextMilestone = dailyMilestones.find(m => m.target > currentOrders);
+
+  // WEEKLY BONUS CALCULATIONS
+  const isPrimePartner = weeklyOrders >= 50; 
   const ordersRemaining = Math.max(0, 20 - weeklyOrders);
   const bonusProgress = Math.min(100, (weeklyOrders / 20) * 100);
 
-  // 🔥 1. FETCH REAL DATABASE DETAILS ON LOAD
+  const celestialColor = isDark ? 'text-slate-300' : 'text-yellow-300';
+  const celestialIcon = isDark ? getIcon('moon', 40) : getIcon('sun', 40); 
+
   useEffect(() => {
     const fetchDriverStats = async () => {
       if (!regData?.mobile) return; 
@@ -264,7 +293,6 @@ export default function HomeSection({ t, regData, setActiveTab }) {
         setDriverName(data.full_name || "Partner"); 
       }
     };
-
     fetchDriverStats();
   }, [regData?.mobile]);
 
@@ -278,7 +306,7 @@ export default function HomeSection({ t, regData, setActiveTab }) {
       setCurrentLang(lang);
       localStorage.setItem("language", lang);
       setShowLangModal(false);
-      window.location.reload(); 
+      window.dispatchEvent(new Event("languageChange")); 
   };
 
   const toggleTheme = (event) => {
@@ -309,33 +337,10 @@ export default function HomeSection({ t, regData, setActiveTab }) {
     });
   };
 
-  // 🔥 2. SUPABASE LOGIC
   useEffect(() => {
     let orderSubscription;
 
-    const fetchPendingOrders = async () => {
-        const { data, error } = await supabase
-          .from('orders')
-          .select('*')
-          .or('status.eq.Pending,status.is.null');
-          
-        if (data && !error) {
-            const myVehicle = driverVehicle.toLowerCase().trim();
-            
-            const relevantOrders = data.filter(order => {
-                const orderVehicle = (order.vehicle_type || "").toLowerCase().trim();
-                if (!orderVehicle || orderVehicle === 'any' || orderVehicle === 'all') return true;
-                if (!myVehicle) return false;
-                return orderVehicle === myVehicle;
-            });
-            
-            setOrders(relevantOrders);
-        }
-    };
-
     if (isOnline) {
-      fetchPendingOrders(); 
-
       orderSubscription = supabase
         .channel('public:orders')
         .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'orders' }, payload => {
@@ -356,14 +361,12 @@ export default function HomeSection({ t, regData, setActiveTab }) {
 
               if (isMatch) {
                   setRingingOrder(newOrder); 
-                  setOrders(prev => [...prev, newOrder]); 
               }
           }
         })
         .subscribe();
     } else {
       setRingingOrder(null);
-      setOrders([]);
     }
 
     return () => {
@@ -393,22 +396,31 @@ export default function HomeSection({ t, regData, setActiveTab }) {
       .update({ status: 'Accepted', driver_name: driverName, driver_number: regData.mobile }) 
       .eq('id', id);
       
-    setOrders(prev => prev.filter(o => o.id !== id));
     setNavigatingOrder(acceptedOrder);
   };
 
   const declineOrder = (id) => {
     setRingingOrder(null);
-    setOrders(prev => prev.filter(o => o.id !== id));
   };
 
-  // 🔥 FIX: NOW SWITCHES TO THE ORDERS TAB IMMEDIATELY!
   const handleGoToLocation = () => {
+      if (navigatingOrder) {
+          localStorage.setItem('activeTrip', JSON.stringify({ ...navigatingOrder, step: 0 }));
+      }
+      
       setNavigatingOrder(null);
+      
       if (setActiveTab) {
           setActiveTab('orders'); 
       }
   };
+
+  const openNotifications = () => {
+      setShowNotifications(true);
+      setAlerts(prev => prev.map(a => ({ ...a, read: true })));
+  };
+
+  const unreadCount = alerts.filter(a => !a.read).length;
 
   return (
     <>
@@ -483,29 +495,29 @@ export default function HomeSection({ t, regData, setActiveTab }) {
         <div className="fixed inset-0 z-[40]" onClick={() => setShowNotifications(false)}></div>
       )}
 
-      {/* NOTIFICATION DROPDOWN UI */}
+      {/* SYSTEM NOTIFICATIONS & ALERTS */}
       <div className={`fixed right-4 max-w-[calc(100vw-32px)] w-[360px] bg-white dark:bg-slate-800 rounded-2xl shadow-[0_10px_40px_rgba(0,0,0,0.2)] dark:shadow-[0_10px_40px_rgba(0,0,0,0.5)] z-[50] transition-all duration-300 overflow-hidden flex flex-col ${showNotifications ? 'top-[70px] opacity-100 pointer-events-auto' : 'top-[-100%] opacity-0 pointer-events-none'}`}>
           <div className="p-4 border-b border-slate-200 dark:border-slate-700 flex items-center justify-between">
-              <h3 className="font-bold text-lg text-slate-900 dark:text-white">New Requests</h3>
-              <button onClick={() => setShowNotifications(false)} className="w-8 h-8 rounded-full bg-slate-100 dark:bg-slate-700 flex items-center justify-center hover:bg-slate-200 dark:hover:bg-slate-600 transition-colors">
-                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="text-slate-600 dark:text-slate-300">
-                      <path d="M18 6L6 18M6 6l12 12"/>
-                  </svg>
+              <h3 className="font-bold text-lg text-slate-900 dark:text-white">Alerts & Offers</h3>
+              <button onClick={() => setShowNotifications(false)} className="w-8 h-8 rounded-full bg-slate-100 dark:bg-slate-700 flex items-center justify-center hover:bg-slate-200 dark:hover:bg-slate-600 transition-colors text-slate-600 dark:text-slate-300">
+                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M18 6L6 18M6 6l12 12"/></svg>
               </button>
           </div>
           <div className="overflow-y-auto max-h-[60vh] p-4 space-y-3">
-              {orders.length > 0 ? (
-                  orders.map(order => (
-                      <div key={order.id} className="p-4 bg-white dark:bg-slate-800 rounded-xl border border-brand-100 dark:border-brand-900/30 shadow-sm relative overflow-hidden">
-                          <div className="absolute left-0 top-0 bottom-0 w-1 bg-brand-500"></div>
-                          <div className="flex justify-between items-start pl-2">
-                              <div>
-                                  <h4 className="font-bold text-slate-900 dark:text-white text-lg">{order.product_name || order.type || 'New Order'}</h4>
-                                  <p className="text-xs text-slate-500 dark:text-slate-400">{order.quantity || 1} Units • {order.vehicle_type || 'Any Vehicle'}</p>
+              {alerts.length > 0 ? (
+                  alerts.map(alert => (
+                      <div key={alert.id} className="p-4 bg-slate-50 dark:bg-slate-800/50 rounded-xl border border-slate-200 dark:border-slate-700 shadow-sm relative overflow-hidden">
+                          {alert.type === 'offer' && <div className="absolute left-0 top-0 bottom-0 w-1 bg-amber-500"></div>}
+                          {alert.type === 'info' && <div className="absolute left-0 top-0 bottom-0 w-1 bg-brand-500"></div>}
+                          
+                          <div className="flex gap-3 pl-2">
+                              <div className={`w-10 h-10 rounded-full flex items-center justify-center flex-shrink-0 ${alert.type === 'offer' ? 'bg-amber-100 text-amber-600 dark:bg-amber-900/30' : 'bg-brand-100 text-brand-600 dark:bg-brand-900/30'}`}>
+                                  {getIcon(alert.type === 'offer' ? 'gift' : 'info', 20)}
                               </div>
-                              <div className="text-right">
-                                  <span className="block font-black text-xl text-brand-600 dark:text-brand-400">₹{order.total_amount || order.delivery_fee || '0'}</span>
-                                  <span className="text-[10px] font-bold text-slate-400">CASH</span>
+                              <div>
+                                  <h4 className="font-bold text-slate-900 dark:text-white text-sm">{alert.title}</h4>
+                                  <p className="text-xs text-slate-600 dark:text-slate-400 mt-1 leading-relaxed">{alert.message}</p>
+                                  <p className="text-[10px] font-bold text-slate-400 uppercase mt-2">{alert.time}</p>
                               </div>
                           </div>
                       </div>
@@ -515,7 +527,7 @@ export default function HomeSection({ t, regData, setActiveTab }) {
                       <div className="w-16 h-16 bg-slate-100 dark:bg-slate-700 rounded-full flex items-center justify-center mx-auto mb-3 text-slate-400">
                           {getIcon('bell', 32)}
                       </div>
-                      <p className="text-slate-500 dark:text-slate-400 text-sm">No new requests</p>
+                      <p className="text-slate-500 dark:text-slate-400 text-sm">No new alerts</p>
                   </div>
               )}
           </div>
@@ -566,13 +578,13 @@ export default function HomeSection({ t, regData, setActiveTab }) {
             </button>
 
             {/* NOTIFICATION BELL BUTTON */}
-            <button onClick={() => setShowNotifications(!showNotifications)} className="relative w-10 h-10 rounded-full bg-slate-100 dark:bg-slate-800 flex items-center justify-center text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700 transition-all active:scale-95">
-                <span className={orders.length > 0 ? "bell-ring" : ""}>
+            <button onClick={openNotifications} className="relative w-10 h-10 rounded-full bg-slate-100 dark:bg-slate-800 flex items-center justify-center text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700 transition-all active:scale-95">
+                <span className={unreadCount > 0 ? "bell-ring" : ""}>
                     <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/></svg>
                 </span>
-                {orders.length > 0 && (
+                {unreadCount > 0 && (
                     <span className="absolute -top-1 -right-1 w-5 h-5 bg-red-500 text-white text-[10px] font-bold rounded-full flex items-center justify-center animate-bounce shadow-sm">
-                        {orders.length}
+                        {unreadCount}
                     </span>
                 )}
             </button>
@@ -656,8 +668,107 @@ export default function HomeSection({ t, regData, setActiveTab }) {
                 </div>
             </div>
 
-            {/* 2. WEEKLY BONUS CARD */}
-            <div className="bg-gradient-to-br from-amber-400 via-orange-400 to-red-500 rounded-3xl p-5 mb-6 text-white shadow-xl shadow-orange-500/20">
+            {/* 🔥 NEW: 2. DAILY INCENTIVE CARD (Gamified) */}
+            <div className="bg-white dark:bg-slate-800 rounded-3xl p-5 shadow-lg border border-slate-100 dark:border-slate-700 relative overflow-hidden">
+                <div className="absolute top-0 right-0 w-32 h-32 bg-green-500/10 rounded-full blur-3xl -mr-10 -mt-10 pointer-events-none"></div>
+                
+                <div className="flex justify-between items-center mb-5 relative z-10">
+                    <div className="flex items-center gap-3">
+                        <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-green-400 to-emerald-600 flex items-center justify-center text-white shadow-md">
+                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon></svg>
+                        </div>
+                        <div>
+                            <h3 className="font-black text-slate-900 dark:text-white">Daily Target</h3>
+                            <p className="text-xs text-slate-500 dark:text-slate-400">Earn extra cash today!</p>
+                        </div>
+                    </div>
+                    <div className="text-right">
+                        <span className="text-2xl font-black text-emerald-600 dark:text-emerald-400">{currentOrders}</span>
+                        <span className="text-[10px] font-bold text-slate-400 block uppercase tracking-widest">Trips</span>
+                    </div>
+                </div>
+
+                {/* Milestone Tracker UI */}
+                <div className="relative pt-6 pb-2 px-2">
+                    {/* Background Track line */}
+                    <div className="absolute top-8 left-3 right-3 h-1.5 bg-slate-100 dark:bg-slate-700 rounded-full z-0"></div>
+                    
+                    {/* Green Active Fill line */}
+                    <div className="absolute top-8 left-3 h-1.5 bg-gradient-to-r from-green-400 to-emerald-500 rounded-full z-0 transition-all duration-1000 ease-out" style={{ width: `calc(${dailyProgress}% * 0.9 + 5px)` }}></div>
+
+                    {/* Nodes */}
+                    <div className="relative z-10 flex justify-between">
+                        {dailyMilestones.map((ms, index) => {
+                            const isReached = currentOrders >= ms.target;
+                            const isCurrentTarget = nextMilestone && ms.target === nextMilestone.target;
+                            
+                            return (
+                                <div key={index} className="flex flex-col items-center relative">
+                                    <div className={`w-5 h-5 rounded-full flex items-center justify-center border-[3px] transition-all duration-500 ${isReached ? 'bg-emerald-500 border-white dark:border-slate-800 scale-[1.3] shadow-md shadow-emerald-500/40' : isCurrentTarget ? 'bg-white dark:bg-slate-800 border-emerald-400 animate-pulse' : 'bg-slate-200 dark:bg-slate-600 border-white dark:border-slate-800'}`}>
+                                        {isReached && <svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="4" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>}
+                                    </div>
+                                    <span className={`text-[10px] font-bold mt-2 ${isReached ? 'text-emerald-600 dark:text-emerald-400' : 'text-slate-400'}`}>
+                                        {ms.target === 0 ? 'Start' : ms.target}
+                                    </span>
+                                    {ms.reward > 0 && (
+                                        <span className={`text-[10px] font-black ${isReached ? 'text-slate-900 dark:text-white' : 'text-slate-400'}`}>
+                                            ₹{ms.reward}
+                                        </span>
+                                    )}
+                                </div>
+                            );
+                        })}
+                    </div>
+                </div>
+
+                <div className="mt-4 p-3 bg-slate-50 dark:bg-slate-800/50 rounded-xl border border-slate-100 dark:border-slate-700 text-center relative z-10">
+                    <p className="text-xs font-semibold text-slate-600 dark:text-slate-300">
+                        {currentOrders >= maxDailyTarget 
+                            ? "🎉 Incredible! You've unlocked the max daily bonus!" 
+                            : `Complete ${nextMilestone?.target - currentOrders} more trips to unlock ₹${nextMilestone?.reward}!`}
+                    </p>
+                </div>
+            </div>
+            
+            {/* 3. AUTO-PLAYING MEDIA SLIDER (Advertisement) */}
+            <div className="relative w-full h-48 rounded-3xl overflow-hidden shadow-xl bg-slate-100 dark:bg-slate-800">
+                {promoMedia.map((media, index) => (
+                    <div 
+                        key={index} 
+                        className={`absolute inset-0 transition-opacity duration-1000 ease-in-out ${index === currentSlide ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}
+                    >
+                        {media.type === 'video' ? (
+                            <video 
+                                src={media.url} 
+                                autoPlay 
+                                muted 
+                                loop 
+                                playsInline 
+                                className="w-full h-full object-cover"
+                            />
+                        ) : (
+                            <img 
+                                src={media.url} 
+                                alt={`Promo ${index}`} 
+                                className="w-full h-full object-cover" 
+                            />
+                        )}
+                    </div>
+                ))}
+                
+                {/* Dots Indicator at the bottom of the slider */}
+                <div className="absolute bottom-3 left-0 right-0 flex justify-center gap-2 z-10">
+                    {promoMedia.map((_, index) => (
+                        <div 
+                            key={index} 
+                            className={`h-2 rounded-full transition-all duration-300 ${index === currentSlide ? 'w-6 bg-white' : 'w-2 bg-white/50'}`}
+                        ></div>
+                    ))}
+                </div>
+            </div>
+
+            {/* 🔥 4. WEEKLY BONUS CARD (Relocated below the slider) */}
+            <div className="bg-gradient-to-br from-amber-400 via-orange-400 to-red-500 rounded-3xl p-5 text-white shadow-xl shadow-orange-500/20">
                 <div className="flex items-center gap-3 mb-3">
                     {getIcon('gift', 24)}
                     <div>
@@ -677,11 +788,7 @@ export default function HomeSection({ t, regData, setActiveTab }) {
                     <p className="text-sm font-semibold">Keep Going! {ordersRemaining} more orders to unlock ₹2000 bonus</p>
                 )}
             </div>
-            
-            {/* 3. SURYA WALLPAPER */}
-            <div className=" margin: '0' rounded-3xl  text-white shadow-xl">
-                <img src="https://th.bing.com/th/id/R.e7d3424217ab8a605c53806b52225001?rik=6BCDskidlZlvKA&riu=http%3a%2f%2fgetwallpapers.com%2fwallpaper%2ffull%2f6%2f4%2f6%2f697414-download-free-surya-hd-wallpaper-2018-1920x1080-meizu.jpg&ehk=niLsJKFrcuiZDD2GiiKSiDLv6cFjz7sUsjNpzqgCSfU%3d&risl=&pid=ImgRaw&r=0" style={{height :"100%" , width: '100%' , borderRadius: '1.5rem'}} alt="banner" />
-            </div>
+
         </div>
     </>
   );
