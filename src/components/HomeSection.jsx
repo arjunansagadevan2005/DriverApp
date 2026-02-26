@@ -160,7 +160,7 @@ function NavigationModal({ order, onClose, onGoToLocation }) {
                 @keyframes slideUpFade { from { transform: translateY(20px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
             `}</style>
 
-            <div onClick={onClose} className="absolute inset-0 bg-black/70 backdrop-blur-sm transition-opacity duration-300"></div>
+            <div className="absolute inset-0 bg-black/70 backdrop-blur-sm transition-opacity duration-300"></div>
             
             <div className="relative w-[90%] max-w-md bg-white dark:bg-slate-900 rounded-3xl shadow-2xl p-6" style={{ animation: 'slideUpFade 0.3s ease-out' }}>
                 <div className="text-center mb-4">
@@ -288,7 +288,7 @@ export default function HomeSection({ t, regData, setActiveTab }) {
             earnings: data.today_earnings || 0, 
             onlineMinutes: 0 
         });
-        setWeeklyOrders(data.weekly_orders || 0);
+        setWeeklyOrders(data.weekly_orders_completed || 0);
         setDriverVehicle(data.vehicle_type || ""); 
         setDriverName(data.full_name || "Partner"); 
       }
@@ -396,6 +396,8 @@ export default function HomeSection({ t, regData, setActiveTab }) {
       .update({ status: 'Accepted', driver_name: driverName, driver_number: regData.mobile }) 
       .eq('id', id);
       
+    // 🔥 FIX: Lock navigation memory immediately upon accept
+    localStorage.setItem('activeTrip', JSON.stringify({ ...acceptedOrder, step: 0 }));
     setNavigatingOrder(acceptedOrder);
   };
 
@@ -404,12 +406,7 @@ export default function HomeSection({ t, regData, setActiveTab }) {
   };
 
   const handleGoToLocation = () => {
-      if (navigatingOrder) {
-          localStorage.setItem('activeTrip', JSON.stringify({ ...navigatingOrder, step: 0 }));
-      }
-      
       setNavigatingOrder(null);
-      
       if (setActiveTab) {
           setActiveTab('orders'); 
       }

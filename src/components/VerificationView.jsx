@@ -9,8 +9,8 @@ export default function VerificationView({ regData, setRegData, handleVerify, lo
           maxLength="6"
           value={regData.otp}
           onChange={(e) => setRegData({...regData, otp: e.target.value})}
-          className="w-full p-4 text-3xl tracking-[1rem] text-center rounded-2xl bg-slate-50 dark:bg-slate-800 dark:text-white outline-none border-2 border-transparent focus:border-brand-500"
-          placeholder="000000"
+          className="w-full p-4 text-4xl tracking-[1rem] text-center rounded-2xl bg-slate-50 dark:bg-slate-800 dark:text-white outline-none border-2 border-transparent focus:border-brand-500"
+          placeholder="0000"
           required
         />
         <button disabled={loading} className="w-full py-4 rounded-2xl font-bold bg-brand-600 text-white shadow-lg">

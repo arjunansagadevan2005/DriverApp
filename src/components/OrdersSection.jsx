@@ -22,7 +22,7 @@ function NavigationModal({ order, onClose, onGoToLocation }) {
                 @keyframes slideUpFade { from { transform: translateY(20px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
             `}</style>
 
-            <div onClick={onClose} className="absolute inset-0 bg-black/70 backdrop-blur-sm transition-opacity duration-300"></div>
+            <div className="absolute inset-0 bg-black/70 backdrop-blur-sm transition-opacity duration-300"></div>
             
             <div className="relative w-[90%] max-w-md bg-white dark:bg-slate-900 rounded-3xl shadow-2xl p-6" style={{ animation: 'slideUpFade 0.3s ease-out' }}>
                 <div className="text-center mb-4">
@@ -76,15 +76,29 @@ function NavigationModal({ order, onClose, onGoToLocation }) {
 // ═══════════════════════════════════════════════════════════════════════════
 export default function OrdersSection({ t, regData }) {
   const [tab, setTab] = useState('new');
+  const [historyFilter, setHistoryFilter] = useState('Completed'); 
+  
+  // Active Trip State
   const [activeTrip, setActiveTrip] = useState(() => {
       const savedTrip = localStorage.getItem('activeTrip');
       if (savedTrip) {
-          localStorage.removeItem('activeTrip'); 
           return JSON.parse(savedTrip); 
       }
       return null;
   });
   
+  // Cancellation States
+  const [isCancelModalOpen, setIsCancelModalOpen] = useState(false);
+  const [cancelReason, setCancelReason] = useState("");
+  const cancelReasonsList = [
+      "Customer is unreachable",
+      "Vehicle breakdown / issue",
+      "Heavy traffic / area blocked",
+      "Incorrect address provided",
+      "Package too large for vehicle",
+      "Personal emergency"
+  ];
+
   const [navigatingOrder, setNavigatingOrder] = useState(null); 
   const { location: driverLocation, gpsError } = useDriverGPS(regData?.mobile, true);
   const [otpInput, setOtpInput] = useState('');
@@ -112,6 +126,7 @@ export default function OrdersSection({ t, regData }) {
       fetchVehicle();
   }, [regData?.mobile]);
 
+  // 🔥 UPDATED FETCH LOGIC: Merges Database History with Local Memory Vault!
   useEffect(() => {
     const fetchOrders = async () => {
       setIsLoading(true);
@@ -134,14 +149,31 @@ export default function OrdersSection({ t, regData }) {
       } 
       else {
         if (regData?.mobile) {
+            // 1. Fetch official completed orders from Supabase
             const { data, error } = await supabase
-            .from('orders')
-            .select('*')
-            .eq('driver_number', regData.mobile)
-            .in('status', ['Completed', 'Cancelled', 'Declined'])
-            .order('created_at', { ascending: false });
+                .from('orders')
+                .select('*')
+                .eq('driver_number', regData.mobile)
+                .in('status', ['Completed']) 
+                .order('created_at', { ascending: false });
 
-            if (data && !error) setHistory(data);
+            // 2. Fetch Cancelled/Missed orders from Local Vault
+            const localVault = JSON.parse(localStorage.getItem(`local_history_${regData.mobile}`) || "[]");
+            
+            // 3. Merge them together safely
+            let combinedHistory = data ? [...data] : [];
+            const existingIds = new Set(combinedHistory.map(item => item.id));
+            
+            localVault.forEach(item => {
+                if (!existingIds.has(item.id)) {
+                    combinedHistory.push(item);
+                }
+            });
+
+            // 4. Sort by newest first
+            combinedHistory.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+
+            setHistory(combinedHistory);
         }
       }
       setIsLoading(false);
@@ -157,24 +189,7 @@ export default function OrdersSection({ t, regData }) {
       .subscribe();
 
     return () => supabase.removeChannel(orderSub);
-  }, [tab, regData?.mobile, dbVehicle]);
-
-  useEffect(() => {
-    const fetchOngoingTrip = async () => {
-        if (!regData?.mobile) return;
-        const { data, error } = await supabase
-            .from('orders')
-            .select('*')
-            .eq('driver_number', regData.mobile)
-            .eq('status', 'Accepted')
-            .maybeSingle(); 
-
-        if (data && !error && !activeTrip && !navigatingOrder) {
-            setActiveTrip({ ...data, step: 0 });
-        }
-    };
-    fetchOngoingTrip();
-  }, [regData?.mobile]);
+  }, [tab, regData?.mobile, dbVehicle, historyFilter]);
 
   // --- LEAFLET MAP LOGIC ---
   useEffect(() => {
@@ -214,7 +229,6 @@ export default function OrdersSection({ t, regData }) {
     const pickupCoords = extractCoords(activeTrip, 'pickup');
     const dropCoords = extractCoords(activeTrip, 'drop');
 
-    // --- REAL ROAD ROUTING API (VEHICLE SPECIFIC) ---
     const fetchRoute = async (startCoords, endCoords, color, dashArray) => {
         try {
             let routingProfile = 'driving-car'; 
@@ -269,7 +283,24 @@ export default function OrdersSection({ t, regData }) {
       await supabase.from('orders')
         .update({ status: 'Accepted', driver_name: regData.fullName || 'Partner', driver_number: regData.mobile })
         .eq('id', order.id);
+      
+      localStorage.setItem('activeTrip', JSON.stringify({ ...order, step: 0 }));
       setNavigatingOrder(order);
+  };
+
+  // 🔥 NEW: Save "Ignored" orders as "Missed" in the Local Vault!
+  const handleIgnore = (order) => {
+      setOrders(prev => prev.filter(o => o.id !== order.id));
+      
+      const missedRecord = {
+          ...order,
+          status: 'Missed',
+          created_at: new Date().toISOString()
+      };
+      
+      const localVault = JSON.parse(localStorage.getItem(`local_history_${regData.mobile}`) || "[]");
+      localVault.push(missedRecord);
+      localStorage.setItem(`local_history_${regData.mobile}`, JSON.stringify(localVault));
   };
 
   const handleGoToLocation = () => {
@@ -278,7 +309,6 @@ export default function OrdersSection({ t, regData }) {
       setActiveTrip({ ...order, step: 0 }); 
   };
 
-  // 🔥 Opens the Native Google Maps App
   const handleStartVoiceNavigation = () => {
       const extractCoords = (order, type) => {
           if (type === 'pickup') {
@@ -307,11 +337,9 @@ export default function OrdersSection({ t, regData }) {
       window.open(gmapsUrl, '_blank');
   };
 
-  // 🔥 REAL-WORLD VALIDATION: Prevent clicking "Arrived" if too far away!
   const handleAdvanceTrip = async () => {
       if (activeTrip.step === 0) {
           
-          // 1. Get the actual Pickup Coordinates safely
           let pLat = 13.0827, pLng = 80.2707;
           if (activeTrip.pickup_latitude && activeTrip.pickup_longitude) {
               pLat = parseFloat(activeTrip.pickup_latitude);
@@ -321,23 +349,25 @@ export default function OrdersSection({ t, regData }) {
               pLng = activeTrip.pickup_coords[1];
           }
 
-          // 2. Check the distance using Leaflet math
           const distanceInMeters = L.latLng(driverLocation).distanceTo(L.latLng([pLat, pLng]));
 
-          // 3. Block the driver if they are more than 200 meters away
           if (distanceInMeters > 200) {
               alert(`You are still ${Math.round(distanceInMeters)} meters away. Please reach the pickup location before marking as arrived.`);
-              return; // STOP execution here. Do not switch the route.
+              return; 
           }
 
-          // 4. If they are close enough, switch to the Delivery Route
-          setActiveTrip({ ...activeTrip, step: 1 }); 
+          const updatedTrip = { ...activeTrip, step: 1 };
+          setActiveTrip(updatedTrip); 
+          localStorage.setItem('activeTrip', JSON.stringify(updatedTrip)); 
           
       } else if (activeTrip.step === 1) {
           const generatedOtp = Math.floor(1000 + Math.random() * 9000).toString();
           await supabase.from('orders').update({ delivery_otp: generatedOtp }).eq('id', activeTrip.id);
           alert(`[SIMULATED SMS TO CUSTOMER] Your delivery OTP is: ${generatedOtp}`);
-          setActiveTrip({ ...activeTrip, step: 2, correctOtp: generatedOtp });
+          
+          const updatedTrip = { ...activeTrip, step: 2, correctOtp: generatedOtp };
+          setActiveTrip(updatedTrip);
+          localStorage.setItem('activeTrip', JSON.stringify(updatedTrip)); 
       }
   };
 
@@ -345,12 +375,56 @@ export default function OrdersSection({ t, regData }) {
       if (otpInput === activeTrip.correctOtp) {
           await supabase.from('orders').update({ status: 'Completed' }).eq('id', activeTrip.id);
           setActiveTrip(null);
+          localStorage.removeItem('activeTrip'); 
           setOtpInput(''); 
           alert('Delivery Completed! Earnings added to wallet.');
           setTab('history'); 
+          setHistoryFilter('Completed');
       } else {
           alert('Invalid OTP. Please ask the customer and try again.');
           setOtpInput(''); 
+      }
+  };
+
+  // 🔥 UPDATED: Saving Cancelled orders into the Local Vault!
+  const confirmCancelTrip = async () => {
+      if (!cancelReason) {
+          alert("Please select a reason before cancelling.");
+          return;
+      }
+
+      try {
+          // 1. Reset the order so another driver can pick it up
+          await supabase.from('orders').update({ 
+              status: 'pending',        
+              driver_name: null,        
+              driver_number: null       
+          }).eq('id', activeTrip.id);
+          
+          // 2. 🔥 SAVE A RECEIPT TO THE LOCAL VAULT FOR HISTORY 🔥
+          const cancelRecord = {
+              ...activeTrip,
+              status: 'Cancelled', // Force status to Cancelled for UI
+              cancel_reason: cancelReason,
+              created_at: new Date().toISOString() // timestamp of cancellation
+          };
+          const localVault = JSON.parse(localStorage.getItem(`local_history_${regData.mobile}`) || "[]");
+          localVault.push(cancelRecord);
+          localStorage.setItem(`local_history_${regData.mobile}`, JSON.stringify(localVault));
+
+          // 3. Clear active trip & unlock app
+          setActiveTrip(null);
+          localStorage.removeItem('activeTrip'); 
+          setIsCancelModalOpen(false);
+          setCancelReason("");
+          
+          alert("Order cancelled. It has been returned to the available pool.");
+          
+          // Force jump to history tab so they see it worked!
+          setTab('history'); 
+          setHistoryFilter('Cancelled'); 
+      } catch (err) {
+          console.error("Error cancelling order:", err);
       }
   };
 
@@ -360,7 +434,7 @@ export default function OrdersSection({ t, regData }) {
               <div ref={mapContainerRef} className="flex-1 w-full z-0"></div>
               
               <div className="absolute top-safe pt-4 left-4 right-4 z-30 flex justify-between">
-                  <button onClick={() => setActiveTrip(null)} className="w-10 h-10 bg-white dark:bg-slate-800 rounded-full shadow-lg flex items-center justify-center text-slate-700 dark:text-slate-300 active:scale-95 transition-transform">
+                  <button onClick={() => alert("⚠️ You cannot exit the map until the delivery is completed or cancelled!")} className="w-10 h-10 bg-white dark:bg-slate-800 rounded-full shadow-lg flex items-center justify-center text-slate-700 dark:text-slate-300 active:scale-95 transition-transform">
                       <span dangerouslySetInnerHTML={{ __html: getIcon('arrowLeft', 20) }} />
                   </button>
                   <div className="bg-white dark:bg-slate-800 px-4 py-2 rounded-full shadow-lg font-bold text-sm dark:text-white flex items-center gap-2">
@@ -396,7 +470,6 @@ export default function OrdersSection({ t, regData }) {
                               </div>
                           </div>
                           
-                          {/* Start Voice Navigation Button */}
                           <div className="grid grid-cols-1 gap-3 mb-3">
                               <button onClick={handleStartVoiceNavigation} className="w-full py-4 rounded-2xl font-bold text-lg bg-blue-600 hover:bg-blue-700 text-white shadow-lg shadow-blue-500/30 flex items-center justify-center gap-2 active:scale-95 transition-transform">
                                   <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polygon points="3 11 22 2 13 21 11 13 3 11"/></svg>
@@ -404,10 +477,13 @@ export default function OrdersSection({ t, regData }) {
                               </button>
                           </div>
 
-                          {/* Existing Advancement Button */}
                           <button onClick={handleAdvanceTrip} className="w-full py-4 rounded-2xl font-black text-lg border-2 border-brand-600 text-brand-600 dark:border-brand-500 dark:text-brand-400 bg-brand-50 dark:bg-brand-900/10 hover:bg-brand-100 dark:hover:bg-brand-900/30 flex items-center justify-center gap-3 active:scale-95 transition-transform">
                               {activeTrip.step === 0 ? 'Arrived at Pickup' : 'Complete Delivery'} 
                               <span dangerouslySetInnerHTML={{ __html: getIcon('check', 24) }} />
+                          </button>
+
+                          <button onClick={() => setIsCancelModalOpen(true)} className="w-full mt-3 py-3 rounded-2xl font-bold text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 transition-all active:scale-95">
+                              Cancel Order
                           </button>
                       </>
                   ) : (
@@ -434,6 +510,10 @@ export default function OrdersSection({ t, regData }) {
                           >
                               Verify & Complete
                           </button>
+
+                          <button onClick={() => setIsCancelModalOpen(true)} className="w-full mt-4 py-3 rounded-2xl font-bold text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 transition-all active:scale-95">
+                              Cancel Order
+                          </button>
                       </div>
                   )}
               </div>
@@ -446,6 +526,55 @@ export default function OrdersSection({ t, regData }) {
                   vehicleNumber={regData?.vehicleNumber}
                   onCallCustomer={() => alert("Calling Customer...")} 
               />
+
+              {/* CANCELLATION MODAL */}
+              {isCancelModalOpen && (
+                  <div className="fixed inset-0 z-[120] flex items-center justify-center p-4">
+                      <div className="absolute inset-0 bg-black/70 backdrop-blur-sm transition-opacity" onClick={() => setIsCancelModalOpen(false)}></div>
+                      
+                      <div className="relative w-full max-w-sm bg-white dark:bg-slate-900 rounded-3xl p-6 shadow-2xl slide-up">
+                          <h2 className="text-xl font-black text-slate-900 dark:text-white mb-2 text-center text-red-600 flex items-center justify-center gap-2">
+                             <span dangerouslySetInnerHTML={{ __html: getIcon('alertCircle', 24) }} /> Cancel Order
+                          </h2>
+                          <p className="text-sm text-slate-500 dark:text-slate-400 text-center mb-6">Select a valid reason for cancelling this trip.</p>
+
+                          <div className="space-y-2 mb-6 max-h-[40vh] overflow-y-auto no-scrollbar pr-1">
+                              {cancelReasonsList.map((reason, idx) => (
+                                  <label key={idx} className={`flex items-center gap-3 p-3 rounded-xl border-2 cursor-pointer transition-all ${cancelReason === reason ? 'border-red-500 bg-red-50 dark:bg-red-900/20' : 'border-slate-100 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-800'}`}>
+                                      <input 
+                                          type="radio" 
+                                          name="cancel_reason" 
+                                          value={reason} 
+                                          onChange={(e) => setCancelReason(e.target.value)} 
+                                          className="hidden" 
+                                      />
+                                      <div className={`w-5 h-5 rounded-full border-2 flex items-center justify-center flex-shrink-0 ${cancelReason === reason ? 'border-red-500' : 'border-slate-300 dark:border-slate-600'}`}>
+                                          {cancelReason === reason && <div className="w-2.5 h-2.5 bg-red-500 rounded-full"></div>}
+                                      </div>
+                                      <span className={`font-semibold text-sm ${cancelReason === reason ? 'text-red-700 dark:text-red-400' : 'text-slate-700 dark:text-slate-300'}`}>{reason}</span>
+                                  </label>
+                              ))}
+                          </div>
+
+                          <div className="space-y-3">
+                              <button 
+                                onClick={confirmCancelTrip} 
+                                disabled={!cancelReason} 
+                                className="w-full py-4 rounded-xl font-black text-lg transition-all active:scale-95 disabled:opacity-50 disabled:active:scale-100 bg-red-600 text-white shadow-lg shadow-red-500/30 hover:bg-red-700"
+                              >
+                                {cancelReason ? 'Confirm Cancel' : 'Select a reason first'}
+                              </button>
+                              
+                              <button 
+                                onClick={() => setIsCancelModalOpen(false)} 
+                                className="w-full py-3 rounded-xl font-bold bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 active:scale-95 transition-transform"
+                              >
+                                Go Back
+                              </button>
+                          </div>
+                      </div>
+                  </div>
+              )}
           </div>
       );
   }
@@ -472,11 +601,29 @@ export default function OrdersSection({ t, regData }) {
         </div>
 
         <div className="grid grid-cols-2 gap-3 relative z-10">
-            <button className="py-3 font-bold text-slate-500 bg-slate-50 dark:bg-slate-800 rounded-xl hover:bg-slate-100 transition-colors">Ignore</button>
+            {/* 🔥 FIX: Clicking Ignore now saves to the 'Missed' History vault! */}
+            <button onClick={() => handleIgnore(order)} className="py-3 font-bold text-slate-500 bg-slate-50 dark:bg-slate-800 rounded-xl hover:bg-slate-100 transition-colors">Ignore</button>
             <button onClick={() => handleAccept(order)} className="py-3 font-bold text-white bg-brand-600 rounded-xl shadow-lg shadow-brand-500/30 active:scale-95 transition-transform">Accept</button>
         </div>
       </div>
   );
+
+  // Helper to style history status badges
+  const getStatusStyle = (status) => {
+      const s = (status || "").toLowerCase();
+      if (s === 'completed') return 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400';
+      if (s === 'cancelled') return 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400';
+      if (s === 'missed') return 'bg-slate-200 text-slate-600 dark:bg-slate-700 dark:text-slate-300';
+      return 'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300';
+  };
+
+  // Filter history logic based on the sub-tab selected
+  const filteredHistory = history.filter(order => {
+      if (historyFilter === 'Completed') return order.status === 'Completed';
+      if (historyFilter === 'Cancelled') return order.status === 'Cancelled';
+      if (historyFilter === 'Missed') return order.status === 'Declined' || order.status === 'Missed';
+      return true;
+  });
 
   return (
     <div className="p-6 space-y-6 fade-in pt-8">
@@ -520,31 +667,58 @@ export default function OrdersSection({ t, regData }) {
                 </div>
             )
         ) : (
-            history.length > 0 ? history.map(order => (
-                <div key={order.id} className="bg-white dark:bg-dark-surface p-5 rounded-3xl border border-slate-100 dark:border-slate-700 shadow-sm">
-                    <div className="flex justify-between items-start mb-2">
-                        <div>
-                            <h3 className="font-bold dark:text-white text-lg">{order.product_name || order.type || 'Delivery'}</h3>
-                            <p className="text-xs text-slate-500">#{order.id.toString().slice(0,6)}</p>
+            <div>
+                {/* SUB-TABS FOR HISTORY FILTERING */}
+                <div className="flex gap-2 overflow-x-auto no-scrollbar mb-5 pb-1">
+                    {['Completed', 'Cancelled', 'Missed'].map(filter => (
+                        <button 
+                            key={filter}
+                            onClick={() => setHistoryFilter(filter)}
+                            className={`px-5 py-2.5 rounded-full text-sm font-bold whitespace-nowrap transition-all ${
+                                historyFilter === filter 
+                                ? 'bg-slate-900 text-white shadow-md dark:bg-brand-600' 
+                                : 'bg-white dark:bg-slate-800 text-slate-500 border border-slate-200 dark:border-slate-700'
+                            }`}
+                        >
+                            {filter} Orders
+                        </button>
+                    ))}
+                </div>
+
+                {/* RENDER FILTERED LIST */}
+                {filteredHistory.length > 0 ? filteredHistory.map((order, idx) => (
+                    <div key={`${order.id}-${idx}`} className="bg-white dark:bg-dark-surface p-5 rounded-3xl border border-slate-100 dark:border-slate-700 shadow-sm mb-4 transition-all hover:shadow-md">
+                        <div className="flex justify-between items-start mb-2">
+                            <div>
+                                <h3 className="font-bold dark:text-white text-lg line-clamp-1">{order.product_name || order.type || 'Delivery'}</h3>
+                                <p className="text-xs text-slate-500">#{order.id.toString().slice(0,6)}</p>
+                            </div>
+                            <div className="text-right">
+                                <p className="text-2xl font-black text-brand-600">₹{order.total_amount || order.delivery_fee || '0'}</p>
+                            </div>
                         </div>
-                        <div className="text-right">
-                            <p className="text-2xl font-black text-brand-600">₹{order.total_amount || order.delivery_fee || '0'}</p>
+                        
+                        {order.cancel_reason && (
+                            <p className="text-xs text-red-500 font-medium mb-2 bg-red-50 dark:bg-red-900/20 p-2 rounded-lg">
+                                Reason: {order.cancel_reason}
+                            </p>
+                        )}
+                        
+                        <div className="mt-3 pt-3 border-t border-slate-100 dark:border-slate-700 flex justify-between items-center">
+                            <span className="text-xs font-semibold text-slate-400">{new Date(order.created_at).toLocaleDateString()}</span>
+                            <span className={`text-[10px] font-black px-2.5 py-1 rounded uppercase tracking-wider ${getStatusStyle(order.status)}`}>
+                                {order.status}
+                            </span>
                         </div>
                     </div>
-                    <div className="mt-2 pt-3 border-t border-slate-100 dark:border-slate-700 flex justify-between items-center">
-                        <span className="text-xs text-slate-400">{new Date(order.created_at).toLocaleDateString()}</span>
-                        <span className={`text-[10px] font-bold px-2 py-1 rounded uppercase ${order.status === 'Completed' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
-                            {order.status}
-                        </span>
+                )) : (
+                    <div className="text-center py-20 text-slate-400">
+                        <span dangerouslySetInnerHTML={{ __html: getIcon('clipboard', 48, 'mx-auto mb-4 opacity-30') }} />
+                        <h3 className="font-bold text-lg text-slate-600 dark:text-slate-300">No {historyFilter} Orders</h3>
+                        <p className="text-sm mt-1">You don't have any {historyFilter.toLowerCase()} trips yet.</p>
                     </div>
-                </div>
-            )) : (
-                <div className="text-center py-20 text-slate-400">
-                    <span dangerouslySetInnerHTML={{ __html: getIcon('clipboard', 48, 'mx-auto mb-4 opacity-30') }} />
-                    <h3 className="font-bold text-lg text-slate-600 dark:text-slate-300">No History Yet</h3>
-                    <p className="text-sm mt-1">Complete your first trip to see history.</p>
-                </div>
-            )
+                )}
+            </div>
         )}
       </div>
 

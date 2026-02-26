@@ -1,19 +1,18 @@
 import React, { useState, useEffect } from 'react';
 import { supabase, ICONS } from '../config';
 
-// Helper to pull icons safely from config
 const getIcon = (name, size = 24, classes = '') => {
-    return `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="${classes}">${ICONS[name] || ''}</svg>`;
+    const iconPath = ICONS[name] || ICONS['star'] || '';
+    return `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="${classes}">${iconPath}</svg>`;
 };
 
 export default function ProfileSection({ t, setView, regData = {} }) {
     const [activeModal, setActiveModal] = useState(null);
     const [isVoiceOn, setIsVoiceOn] = useState(true);
-    const [language, setLanguage] = useState(localStorage.getItem('language') || 'en');
+    const [fetchError, setFetchError] = useState(""); 
     
     // Performance Tab State
     const [perfPeriod, setPerfPeriod] = useState('daily');
-
     const [leaderboard, setLeaderboard] = useState([]);
 
     // Notification Toggles State
@@ -21,142 +20,291 @@ export default function ProfileSection({ t, setView, regData = {} }) {
         newOrders: true, earnings: true, promotions: true, updates: true
     });
 
-    // 🔥 1. STATE FOR LIVE SUPABASE DATA
     const [dbData, setDbData] = useState({ 
-        todayOrders: 0, 
-        todayEarnings: 0, 
-        weeklyOrders: 0, 
-        walletBalance: 0,
-        referrals: 0,
-        referralCode: "PENDING",
-        fullName: "Partner",
-        driverId: "PENDING",
-        bankAccount: "",
-        ifscCode: "",
-        vehicleType: "",
-        vehicleNumber: ""
+        todayOrders: 0, todayEarnings: 0, weeklyOrders: 0, walletBalance: 0,
+        referrals: 0, referralCode: "PENDING", fullName: "Partner", driverId: "PENDING",
+        bankAccount: "", ifscCode: "", vehicleType: "Not Set", vehicleNumber: "N/A",
+        avatarUrl: null // 🔥 FIXED: Added avatarUrl to properly fetch image!
     });
 
     useEffect(() => {
         const fetchProfileData = async () => {
-            if (!regData?.mobile) return;
-
-            // Fetch My Profile
-            const { data, error } = await supabase
-                .from('driver_details') 
-                .select('*')
-                .eq('mobile', regData.mobile)
-                .single();
-
-            // 🔥 NEW: Fetch Leaderboard (Top 5 Drivers by Today's Earnings)
-            const { data: topDriversData } = await supabase
-                .from('driver_details')
-                .select('full_name, mobile, today_earnings, today_orders')
-                .order('today_earnings', { ascending: false })
-                .limit(5);
-
-            if (data && !error) {
-                setDbData(prev => ({
-                    todayOrders: data.today_orders ?? data.todayOrders ?? 0,
-                    todayEarnings: data.today_earnings ?? data.todayEarnings ?? 0,
-                    weeklyOrders: data.weekly_orders ?? data.weeklyOrders ?? 0,
-                    walletBalance: data.wallet_balance ?? data.walletBalance ?? 0,
-                    referrals: data.referrals ?? 0,
-                    referralCode: data.referral_code ?? data.referralCode ?? "NONE",
-                    fullName: data.full_name ?? data.fullName ?? prev.fullName,
-                    driverId: data.driver_id ?? data.driverId ?? prev.driverId,
-                    bankAccount: data.bank_account ?? data.bankAccount ?? prev.bankAccount,
-                    ifscCode: data.ifsc_code ?? data.ifscCode ?? prev.ifscCode,
-                    vehicleType: data.vehicle_type ?? data.vehicleType ?? prev.vehicleType,
-                    vehicleNumber: data.vehicle_number ?? data.vehicleNumber ?? prev.vehicleNumber,
-                    vehicleWeight: data.vehicle_weight ?? data.vehicleWeight ?? prev.vehicleWeight
-                }));
+            if (!regData?.mobile) {
+                setFetchError("Please log in again. Mobile number is missing.");
+                return;
             }
 
-            // 🔥 NEW: Format Leaderboard Data
-            if (topDriversData) {
-                const formattedLeaderboard = topDriversData.map((d, index) => ({
-                    name: d.mobile === regData.mobile ? 'You' : (d.full_name || 'Partner'),
-                    earnings: d.today_earnings || 0,
-                    trips: d.today_orders || 0,
-                    rank: index + 1,
-                    isMe: d.mobile === regData.mobile
-                }));
-                setLeaderboard(formattedLeaderboard);
-            }
-        };
+            let safeMobile = String(regData.mobile).replace(/\D/g, '');
+            if (safeMobile.length > 10) safeMobile = safeMobile.slice(-10); 
 
-        fetchProfileData();
-    }, [regData]);
+            try {
+                const { data, error } = await supabase.from('driver_details').select('*').eq('mobile_number', safeMobile).limit(1);
 
-    // 🔥 2. FETCH ORIGINAL DETAILS FROM SUPABASE
-    // 🔥 2. FETCH ORIGINAL DETAILS FROM SUPABASE
-    useEffect(() => {
-        const fetchProfileData = async () => {
-            if (!regData?.mobile) return;
+                if (error) setFetchError(error.message);
+                else if (data && data.length > 0) {
+                    const row = data[0]; 
+                    setFetchError(""); 
+                    setDbData({
+                        todayOrders: Number(row.total_orders_completed) || 0, 
+                        todayEarnings: Number(row.total_earnings) || 0,
+                        weeklyOrders: Number(row.weekly_orders_completed) || 0, 
+                        walletBalance: Number(row.wallet_balance) || 0,
+                        referrals: Number(row.referrals) || 0,
+                        referralCode: row.referral_code || "NONE",
+                        fullName: row.full_name || "Partner",
+                        driverId: row.driver_id || "PENDING",
+                        bankAccount: row.bank_account_number || "", 
+                        ifscCode: row.ifsc_code || "",
+                        vehicleType: row.vehicle_type || "Not Set",
+                        vehicleNumber: row.vehicle_number || "N/A",
+                        avatarUrl: row.avatar_url || null // 🔥 Database Avatar URL!
+                    });
+                }
 
-            // We use '*' to grab everything safely without crashing if a stats column is missing
-            const { data, error } = await supabase
-                .from('driver_details') 
-                .select('*')
-                .eq('mobile_number', regData.mobile) // 🔥 FIX 1: Matches your DB 'mobile_number'
-                .single();
+                // Fetch Leaderboard
+                const { data: topDriversData } = await supabase
+                    .from('driver_details')
+                    .select('full_name, mobile_number, weekly_earnings, weekly_orders_completed') 
+                    .order('weekly_earnings', { ascending: false, nullsFirst: false }) 
+                    .limit(10); 
 
-            if (data && !error) {
-                setDbData({
-                    // 🔥 FIX 2: Map exact DB column names to the React state
-                    fullName: data.full_name || "Partner",
-                    driverId: data.driver_id || "PENDING",
-                    bankAccount: data.bank_account_number || "", // Exact match to your DB
-                    ifscCode: data.ifsc_code || "",
-                    vehicleType: data.vehicle_type || "Not Set",
-                    vehicleNumber: data.vehicle_number || "N/A",
-                    
-                    // Stats (Defaults to 0 if you haven't added these columns to your table yet)
-                    todayOrders: data.today_orders || 0,
-                    todayEarnings: data.today_earnings || 0,
-                    weeklyOrders: data.weekly_orders || 0,
-                    walletBalance: data.wallet_balance || 0,
-                    referrals: data.referrals || 0,
-                    referralCode: data.referral_code || "NONE"
-                });
-            } else if (error) {
-                console.error("Error fetching driver details:", error.message);
+                if (topDriversData) {
+                    setLeaderboard(topDriversData.map((d, index) => ({
+                        name: d.mobile_number === safeMobile ? (t && t('you') ? t('you') : 'You') : (d.full_name || 'Partner'),
+                        earnings: Number(d.weekly_earnings) || 0, 
+                        trips: Number(d.weekly_orders_completed) || 0, 
+                        rank: index + 1,
+                        isMe: d.mobile_number === safeMobile
+                    })));
+                }
+            } catch (err) {
+                setFetchError("Network error. Please check VPN.");
             }
         };
 
         fetchProfileData();
-    }, [regData?.mobile]);
 
-    const achievements = [
-        { id: 1, name: 'First Delivery', desc: 'Complete your first order', unlocked: true, icon: 'package' },
-        { id: 2, name: 'Speed Demon', desc: 'Complete 5 orders in a day', unlocked: true, icon: 'truck' },
-        { id: 3, name: 'Week Warrior', desc: 'Complete 20 orders in a week', unlocked: true, icon: 'trophy' },
-        { id: 4, name: '5-Star Rating', desc: 'Maintain 5.0 rating for a week', unlocked: false, icon: 'star' },
-        { id: 5, name: 'Early Bird', desc: 'Complete 10 morning deliveries', unlocked: false, icon: 'sun' },
-        { id: 6, name: 'Night Owl', desc: 'Complete 10 night deliveries', unlocked: false, icon: 'moon' }
+        // REAL-TIME DB SYNC (Updates Profile automatically when order finishes)
+        let driverSub;
+        if (regData?.mobile) {
+            let safeMobile = String(regData.mobile).replace(/\D/g, '');
+            if (safeMobile.length > 10) safeMobile = safeMobile.slice(-10);
+
+            driverSub = supabase.channel('profile_updates')
+                .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'driver_details', filter: `mobile_number=eq.${safeMobile}` }, (payload) => {
+                    const row = payload.new;
+                    setDbData(prev => ({
+                        ...prev,
+                        todayOrders: Number(row.total_orders_completed) || prev.todayOrders,
+                        todayEarnings: Number(row.total_earnings) || prev.todayEarnings,
+                        weeklyOrders: Number(row.weekly_orders_completed) || prev.weeklyOrders,
+                        walletBalance: Number(row.wallet_balance) || prev.walletBalance
+                    }));
+                }).subscribe();
+        }
+        return () => { if (driverSub) supabase.removeChannel(driverSub); };
+
+    }, [regData?.mobile, t]);
+
+    const ranks = [
+        { id: 1, name: 'Trainee', threshold: 0, icon: 'user', colorBg: 'bg-slate-100 dark:bg-slate-800', colorText: 'text-slate-600 dark:text-slate-400' },
+        { id: 2, name: 'Second Officer', threshold: 16, icon: 'award', colorBg: 'bg-cyan-100 dark:bg-cyan-900/30', colorText: 'text-cyan-700 dark:text-cyan-500' },
+        { id: 3, name: 'Junior First Officer', threshold: 18, icon: 'award', colorBg: 'bg-blue-100 dark:bg-blue-900/30', colorText: 'text-blue-700 dark:text-blue-500' },
+        { id: 4, name: 'First Officer', threshold: 20, icon: 'star', colorBg: 'bg-indigo-100 dark:bg-indigo-900/30', colorText: 'text-indigo-700 dark:text-indigo-500' },
+        { id: 5, name: 'Captain', threshold: 22, icon: 'trophy', colorBg: 'bg-purple-100 dark:bg-purple-900/30', colorText: 'text-purple-700 dark:text-purple-500' },
+        { id: 6, name: 'Flight Captain', threshold: 24, icon: 'crown', colorBg: 'bg-amber-100 dark:bg-amber-900/30', colorText: 'text-amber-700 dark:text-amber-500' },
+        { id: 7, name: 'Senior Flight Captain', threshold: 26, icon: 'crown', colorBg: 'bg-orange-100 dark:bg-orange-900/30', colorText: 'text-orange-700 dark:text-orange-500' },
+        { id: 8, name: 'Commercial Captain', threshold: 30, icon: 'crown', colorBg: 'bg-red-100 dark:bg-red-900/30', colorText: 'text-red-700 dark:text-red-500' }
     ];
 
-    // Derived Prime Logic State
-    const isPrime = dbData.weeklyOrders >= 60;
-    const progressPercent = Math.min(100, (dbData.weeklyOrders / 60) * 100);
-    const ordersNeeded = Math.max(0, 60 - dbData.weeklyOrders);
+    const currentWeeklyOrders = Number(dbData.weeklyOrders) || 0;
+    let currentRankIndex = ranks.findIndex(r => currentWeeklyOrders < r.threshold) - 1;
+    if (currentRankIndex < 0) currentRankIndex = ranks.length - 1; 
+    if (currentWeeklyOrders === 0) currentRankIndex = 0; 
+    const currentRank = ranks[currentRankIndex];
+
+    const isPilot = currentWeeklyOrders >= 50; 
+    const progressPercent = Math.min(100, (currentWeeklyOrders / 50) * 100);
+    const ordersNeededForPilot = Math.max(0, 50 - currentWeeklyOrders);
 
     const handleLogout = async () => {
         await supabase.auth.signOut();
+        localStorage.removeItem('qc_driver_session');
+        localStorage.removeItem('qc_current_view');
         if (setView) setView('welcome');
     };
 
     const showToast = (msg) => alert(msg);
 
-    // --- EXACT MODALS FROM YOUR HTML ---
     const renderModal = () => {
         if (!activeModal) return null;
 
         let content = null;
 
-        if (activeModal === 'docs') {
-            const renderDoc = (name, file) => `
+        if (activeModal === 'achievements') {
+            const nextRank = ranks[currentRankIndex + 1];
+            let rankProgress = 100;
+            let ordersNeeded = 0;
+            if (nextRank) {
+                const range = nextRank.threshold - currentRank.threshold;
+                const progress = currentWeeklyOrders - currentRank.threshold;
+                rankProgress = Math.min(100, Math.max(0, (progress / range) * 100));
+                ordersNeeded = nextRank.threshold - currentWeeklyOrders;
+            }
+
+            content = (
+                <div>
+                    <h2 className="text-xl font-bold mb-4 dark:text-white flex items-center gap-2">
+                        <span dangerouslySetInnerHTML={{ __html: getIcon('trophy', 24, 'text-brand-600') }} /> Weekly Aviation Ranks
+                    </h2>
+
+                    <div className={`p-5 rounded-2xl mb-6 border-2 shadow-sm ${currentRank.colorBg} border-transparent`}>
+                        <div className="flex justify-between items-center mb-3">
+                            <div>
+                                <p className={`text-sm font-bold ${currentRank.colorText} opacity-80 uppercase`}>Current Rank</p>
+                                <h3 className={`text-2xl font-black ${currentRank.colorText}`}>{currentRank.name}</h3>
+                            </div>
+                            <div className={`w-14 h-14 rounded-full flex items-center justify-center bg-white/30 dark:bg-black/20 backdrop-blur-sm ${currentRank.colorText}`} dangerouslySetInnerHTML={{ __html: getIcon(currentRank.icon, 32, 'fill-current opacity-50') }} />
+                        </div>
+                        
+                        {nextRank ? (
+                            <>
+                             <div className="flex justify-between text-sm font-bold mb-1">
+                                 <span className={currentRank.colorText}>{currentWeeklyOrders} Orders</span>
+                                 <span className="opacity-60">{nextRank.threshold} Goal</span>
+                             </div>
+                             <div className="relative h-3 bg-black/10 dark:bg-white/10 rounded-full overflow-hidden">
+                                 <div className={`absolute top-0 left-0 h-full rounded-full transition-all duration-1000 ease-out bg-current ${currentRank.colorText}`} style={{ width: `${rankProgress}%` }}></div>
+                             </div>
+                             <p className={`text-xs mt-2 font-medium ${currentRank.colorText} opacity-80`}>
+                                 {ordersNeeded} more orders to reach <span className="font-bold">{nextRank.name}</span>
+                             </p>
+                            </>
+                        ) : (
+                            <p className={`text-sm font-bold ${currentRank.colorText}`}>You are at the top rank! Incredible work!</p>
+                        )}
+                    </div>
+
+                    <h3 className="font-bold text-slate-900 dark:text-white mb-4">Progression Path</h3>
+                    <div className="relative space-y-0 pl-2 ml-4 border-l-2 border-slate-200 dark:border-slate-700">
+                        {ranks.map((rank, index) => {
+                            const isCompleted = currentWeeklyOrders >= rank.threshold;
+                            const isCurrent = index === currentRankIndex;
+
+                            return (
+                                <div key={rank.id} className={`relative pl-8 pb-8 ${index === ranks.length - 1 ? 'pb-0' : ''}`}>
+                                    <div className={`absolute -left-[17px] top-0 w-9 h-9 rounded-full border-4 transition-all
+                                        ${isCompleted || isCurrent ? `${rank.colorBg} border-white dark:border-dark-surface shadow-sm` : 'bg-slate-100 dark:bg-slate-800 border-white dark:border-dark-surface'} 
+                                        flex items-center justify-center z-10`}>
+                                        <div className={`${isCompleted || isCurrent ? rank.colorText : 'text-slate-300 dark:text-slate-600'}`} 
+                                             dangerouslySetInnerHTML={{ __html: getIcon(rank.icon, 16, isCompleted || isCurrent ? 'fill-current' : '') }} />
+                                    </div>
+
+                                    <div className={`p-4 rounded-xl border transition-all
+                                        ${isCurrent ? `${rank.colorBg} border-transparent shadow-md scale-[1.02]` : 
+                                          isCompleted ? 'bg-slate-50 dark:bg-slate-800/50 border-slate-200 dark:border-slate-700 opacity-80' : 
+                                          'bg-white dark:bg-dark-surface border-slate-100 dark:border-slate-800 opacity-50 grayscale'}`}>
+                                        <div className="flex justify-between items-center">
+                                            <h4 className={`font-bold text-lg ${isCurrent ? rank.colorText : 'text-slate-900 dark:text-white'}`}>{rank.name}</h4>
+                                            {isCurrent && <span className="text-xs font-bold px-2 py-0.5 rounded-full bg-white/30 dark:bg-black/20 uppercase tracking-wider">Current</span>}
+                                        </div>
+                                        <p className={`text-sm font-medium mt-1 ${isCurrent ? rank.colorText : 'text-slate-500 dark:text-slate-400'}`}>
+                                            {rank.threshold === 0 ? 'Starting Rank' : `${rank.threshold}+ Orders / Week`}
+                                        </p>
+                                    </div>
+                                </div>
+                            );
+                        })}
+                    </div>
+                </div>
+            );
+        }
+        else if (activeModal === 'performance') {
+            const mockGraphData = {
+                daily: [ { label: 'Mon', value: 400 }, { label: 'Tue', value: 650 }, { label: 'Wed', value: 450 }, { label: 'Thu', value: 800 }, { label: 'Fri', value: 550 }, { label: 'Sat', value: 1200 }, { label: 'Sun', value: 950 } ],
+                monthly: [ { label: 'Wk 1', value: 2500 }, { label: 'Wk 2', value: 3800 }, { label: 'Wk 3', value: 2100 }, { label: 'Wk 4', value: 4200 } ],
+                yearly: [ { label: 'Jan', value: 14000 }, { label: 'Feb', value: 16500 }, { label: 'Mar', value: 12000 }, { label: 'Apr', value: 18000 }, { label: 'May', value: 15500 }, { label: 'Jun', value: 21000 } ]
+            };
+            const currentGraph = mockGraphData[perfPeriod];
+            const maxVal = Math.max(...currentGraph.map(d => d.value));
+
+            content = (
+                <div>
+                    <h2 className="text-2xl font-bold mb-5 dark:text-white flex items-center gap-2">
+                        <span dangerouslySetInnerHTML={{ __html: getIcon('trendingUp', 28, 'text-brand-600') }} /> Performance
+                    </h2>
+                    
+                    <div className="flex gap-3 mb-5">
+                        {['daily', 'monthly', 'yearly'].map(p => (
+                            <button key={p} onClick={() => setPerfPeriod(p)} className={`flex-1 py-3 rounded-xl font-semibold transition-all border-2 ${perfPeriod === p ? 'bg-gradient-to-br from-cyan-500 to-cyan-600 text-white border-transparent shadow-lg shadow-cyan-500/40' : 'bg-transparent text-slate-500 border-slate-300 dark:border-slate-600'}`}>
+                                <span className="capitalize">{p}</span>
+                            </button>
+                        ))}
+                    </div>
+                    
+                    <div className="grid grid-cols-3 gap-3 mb-5">
+                        <div className="rounded-2xl p-4 border border-blue-200 bg-blue-50 dark:bg-blue-900/20 dark:border-blue-800">
+                            <p className="text-xs font-semibold text-blue-700 dark:text-blue-400 mb-1">Acceptance</p>
+                            <p className="text-xl font-black text-blue-900 dark:text-blue-300">92%</p>
+                        </div>
+                        <div className="rounded-2xl p-4 border border-green-200 bg-green-50 dark:bg-green-900/20 dark:border-green-800">
+                            <p className="text-xs font-semibold text-green-700 dark:text-green-400 mb-1">Earnings</p>
+                            <p className="text-xl font-black text-green-900 dark:text-green-300">₹{dbData.todayEarnings}</p>
+                        </div>
+                        <div className="rounded-2xl p-4 border border-purple-200 bg-purple-50 dark:bg-purple-900/20 dark:border-purple-800">
+                            <p className="text-xs font-semibold text-purple-700 dark:text-purple-400 mb-1">Trips</p>
+                            <p className="text-xl font-black text-purple-900 dark:text-purple-300">{dbData.todayOrders}</p>
+                        </div>
+                    </div>
+
+                    <div className="bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700 rounded-2xl p-5 mb-5 flex flex-col justify-end">
+                         <div className="flex justify-between items-end h-40 gap-2 w-full border-b border-slate-200 dark:border-slate-700 pb-2 pt-8">
+                            {currentGraph.map((item, i) => (
+                                <div key={i} className="flex flex-col items-center flex-1 group relative h-full justify-end">
+                                    <div className="absolute -top-8 bg-slate-800 dark:bg-slate-700 text-white text-[10px] font-bold px-2 py-1 rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap z-10 pointer-events-none shadow-lg">
+                                        ₹{item.value}
+                                    </div>
+                                    <div className="w-full max-w-[24px] flex justify-center items-end h-full">
+                                        <div 
+                                            className="w-full bg-gradient-to-t from-brand-600 to-cyan-400 rounded-t-md transition-all duration-700 ease-out shadow-sm"
+                                            style={{ height: `${(item.value / maxVal) * 100}%` }}
+                                        ></div>
+                                    </div>
+                                    <span className="text-[10px] font-bold text-slate-500 dark:text-slate-400 mt-2">{item.label}</span>
+                                </div>
+                            ))}
+                         </div>
+                    </div>
+                </div>
+            );
+        }
+        else if (activeModal === 'leaderboard') {
+             content = (
+                <div>
+                    <h2 className="text-xl font-bold mb-4 dark:text-white flex items-center gap-2">
+                        <span dangerouslySetInnerHTML={{ __html: getIcon('award', 24, 'text-yellow-600') }} /> Weekly Leaderboard
+                    </h2>
+                    <div className="space-y-2 max-h-96 overflow-y-auto pr-2">
+                        {leaderboard.length > 0 ? leaderboard.map(driver => (
+                            <div key={driver.rank} className={`p-4 rounded-xl ${driver.isMe ? 'bg-brand-50 dark:bg-brand-900/20 border-2 border-brand-500' : 'bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700'} flex items-center gap-3`}>
+                                <div className={`w-10 h-10 rounded-full ${driver.rank <= 3 ? 'bg-gradient-to-br from-yellow-400 to-yellow-600 text-white' : 'bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-300'} flex items-center justify-center font-black`}>
+                                    {driver.rank <= 3 ? <span dangerouslySetInnerHTML={{ __html: getIcon('trophy', 20) }} /> : driver.rank}
+                                </div>
+                                <div className="flex-1">
+                                    <h3 className="font-bold text-slate-900 dark:text-white">{driver.name}</h3>
+                                    <p className="text-xs text-slate-600 dark:text-slate-400">{driver.trips} trips • ₹{driver.earnings}</p>
+                                </div>
+                                <div className="text-sm font-bold text-slate-500 dark:text-slate-400">#{driver.rank}</div>
+                            </div>
+                        )) : (
+                            <p className="text-center text-slate-500 py-10">Loading Leaderboard...</p>
+                        )}
+                    </div>
+                </div>
+            );
+        }
+        else if (activeModal === 'docs') {
+             const renderDoc = (name, file) => `
                 <div class="flex items-center justify-between p-3 bg-white dark:bg-slate-800 rounded-lg border border-slate-100 dark:border-slate-700">
                     <div class="flex items-center gap-3">
                         <div class="${file ? 'text-green-500' : 'text-slate-300'}">${getIcon('check', 18)}</div>
@@ -170,12 +318,12 @@ export default function ProfileSection({ t, setView, regData = {} }) {
             `;
             content = (
                 <div>
-                    <h2 className="text-xl font-bold mb-4 dark:text-white">{t('documents')}</h2>
+                    <h2 className="text-xl font-bold mb-4 dark:text-white">Documents</h2>
                     <div className="space-y-3" dangerouslySetInnerHTML={{ __html: 
-                        renderDoc(t('driving_license'), regData.licenseFile) +
-                        renderDoc(t('rc_book'), regData.rcFile) +
-                        renderDoc(t('insurance'), regData.insuranceFile) +
-                        renderDoc(t('aadhaar'), regData.aadhaarFile)
+                        renderDoc('Driving License', regData.licenseFile) +
+                        renderDoc('RC Book', regData.rcFile) +
+                        renderDoc('Insurance', regData.insuranceFile) +
+                        renderDoc('Aadhaar Card', regData.aadhaarFile)
                     }}></div>
                 </div>
             );
@@ -188,7 +336,7 @@ export default function ProfileSection({ t, setView, regData = {} }) {
             content = (
                 <div>
                     <h2 className="text-xl font-bold mb-4 dark:text-white flex items-center gap-2">
-                        <span dangerouslySetInnerHTML={{ __html: getIcon('card', 24, 'text-brand-600 dark:text-brand-400') }} /> {t('bank_acct')}
+                        <span dangerouslySetInnerHTML={{ __html: getIcon('card', 24, 'text-brand-600 dark:text-brand-400') }} /> Bank Account
                     </h2>
                     
                     {hasAccountDetails ? (
@@ -238,14 +386,6 @@ export default function ProfileSection({ t, setView, regData = {} }) {
                                     </div>
                                 </div>
                             </div>
-                            
-                            <div className="flex items-center gap-3 p-4 bg-green-50 dark:bg-green-900/20 text-green-700 dark:text-green-400 rounded-xl border border-green-200 dark:border-green-800">
-                                <div className="w-10 h-10 rounded-full bg-green-600 dark:bg-green-500 flex items-center justify-center text-white flex-shrink-0" dangerouslySetInnerHTML={{ __html: getIcon('check', 20) }} />
-                                <div className="flex-1">
-                                    <div className="font-bold text-sm">Verified for Payouts</div>
-                                    <div className="text-xs opacity-75">Your account is ready to receive payments</div>
-                                </div>
-                            </div>
                         </>
                     ) : (
                         <div className="text-center py-12">
@@ -257,220 +397,11 @@ export default function ProfileSection({ t, setView, regData = {} }) {
                 </div>
             );
         }
-        else if (activeModal === 'achievements') {
-            content = (
-                <div>
-                    <h2 className="text-xl font-bold mb-4 dark:text-white flex items-center gap-2">
-                        <span dangerouslySetInnerHTML={{ __html: getIcon('trophy', 24, 'text-purple-600') }} /> {t('achievements')}
-                    </h2>
-                    <div className="space-y-3 max-h-96 overflow-y-auto pr-2">
-                        {achievements.map(ach => (
-                            <div key={ach.id} className={`p-4 rounded-2xl border-2 ${ach.unlocked ? 'bg-purple-50 dark:bg-purple-900/20 border-purple-200 dark:border-purple-800' : 'bg-slate-50 dark:bg-slate-800 border-slate-200 dark:border-slate-700'} flex items-center gap-4`}>
-                                <div className={`w-12 h-12 rounded-full ${ach.unlocked ? 'bg-purple-600' : 'bg-slate-300 dark:bg-slate-700'} flex items-center justify-center text-white`} dangerouslySetInnerHTML={{ __html: getIcon(ach.icon, 24) }} />
-                                <div className="flex-1">
-                                    <h3 className="font-bold text-slate-900 dark:text-white">{ach.name}</h3>
-                                    <p className="text-xs text-slate-600 dark:text-slate-400">{ach.desc}</p>
-                                </div>
-                                <div className={`text-xs font-bold px-2 py-1 rounded ${ach.unlocked ? 'text-purple-600 dark:text-purple-400 bg-purple-100 dark:bg-purple-900/30' : 'text-slate-400 bg-slate-100 dark:bg-slate-700'}`}>
-                                    {ach.unlocked ? t('unlocked') : t('locked')}
-                                </div>
-                            </div>
-                        ))}
-                    </div>
-                </div>
-            );
-        }
-        else if (activeModal === 'referral') {
-            content = (
-                <div>
-                    <h2 className="text-xl font-bold mb-4 dark:text-white flex items-center gap-2">
-                        <span dangerouslySetInnerHTML={{ __html: getIcon('gift', 24, 'text-amber-600') }} /> {t('referral_program')}
-                    </h2>
-                    <div className="bg-gradient-to-br from-amber-50 to-orange-50 dark:from-amber-900/20 dark:to-orange-900/20 rounded-2xl p-6 border-2 border-amber-200 dark:border-amber-800 mb-4">
-                        <p className="text-sm text-amber-700 dark:text-amber-400 mb-2 font-semibold">{t('your_code')}</p>
-                        <div className="flex items-center gap-2 mb-3">
-                            <div className="flex-1 bg-white dark:bg-slate-800 rounded-lg p-3 font-mono text-2xl font-black text-amber-600 dark:text-amber-400 text-center">
-                                {dbData.referralCode}
-                            </div>
-                            <button onClick={() => { navigator.clipboard.writeText(dbData.referralCode); showToast('Copied!'); }} className="p-3 bg-amber-600 text-white rounded-lg hover:bg-amber-700 active:scale-95 transition-transform" dangerouslySetInnerHTML={{ __html: getIcon('copy', 20) }} />
-                        </div>
-                        <p className="text-xs text-amber-600 dark:text-amber-400">{t('share_code')}</p>
-                    </div>
-                    <div className="grid grid-cols-2 gap-3 mb-4">
-                        <div className="bg-white dark:bg-slate-800 rounded-xl p-4 border border-slate-200 dark:border-slate-700">
-                            <p className="text-xs text-slate-500 dark:text-slate-400 mb-1">{t('total_referrals')}</p>
-                            <p className="text-2xl font-black text-slate-900 dark:text-white">{dbData.referrals}</p>
-                        </div>
-                        <div className="bg-white dark:bg-slate-800 rounded-xl p-4 border border-slate-200 dark:border-slate-700">
-                            <p className="text-xs text-slate-500 dark:text-slate-400 mb-1">{t('referral_earnings')}</p>
-                            <p className="text-2xl font-black text-green-600 dark:text-green-400">₹{dbData.referrals * 500}</p>
-                        </div>
-                    </div>
-                    <button onClick={() => showToast('Sharing...')} className="w-full py-4 bg-amber-600 text-white rounded-xl font-bold flex items-center justify-center gap-2">
-                        <span dangerouslySetInnerHTML={{ __html: getIcon('share2', 18) }} /> {t('share')}
-                    </button>
-                </div>
-            );
-        }
-        else if (activeModal === 'performance') {
-            content = (
-                <div>
-                    <h2 className="text-2xl font-bold mb-5 dark:text-white flex items-center gap-2">
-                        <span dangerouslySetInnerHTML={{ __html: getIcon('trendingUp', 28, 'text-brand-600') }} /> Performance
-                    </h2>
-                    <div className="flex gap-3 mb-5">
-                        {['daily', 'monthly', 'yearly'].map(p => (
-                            <button key={p} onClick={() => setPerfPeriod(p)} className={`flex-1 py-3 rounded-xl font-semibold transition-all border-2 ${perfPeriod === p ? 'bg-gradient-to-br from-cyan-500 to-cyan-600 text-white border-transparent shadow-lg shadow-cyan-500/40' : 'bg-transparent text-slate-500 border-slate-300 dark:border-slate-600'}`}>
-                                <span className="capitalize">{p}</span>
-                            </button>
-                        ))}
-                    </div>
-                    
-                    <div className="grid grid-cols-3 gap-3 mb-5">
-                        <div className="rounded-2xl p-4 border border-blue-200 bg-blue-50 dark:bg-blue-900/20 dark:border-blue-800">
-                            <p className="text-xs font-semibold text-blue-700 dark:text-blue-400 mb-1">Acceptance</p>
-                            <p className="text-xl font-black text-blue-900 dark:text-blue-300">92%</p>
-                        </div>
-                        <div className="rounded-2xl p-4 border border-green-200 bg-green-50 dark:bg-green-900/20 dark:border-green-800">
-                            <p className="text-xs font-semibold text-green-700 dark:text-green-400 mb-1">Earnings</p>
-                            <p className="text-xl font-black text-green-900 dark:text-green-300">₹{dbData.todayEarnings}</p>
-                        </div>
-                        <div className="rounded-2xl p-4 border border-purple-200 bg-purple-50 dark:bg-purple-900/20 dark:border-purple-800">
-                            <p className="text-xs font-semibold text-purple-700 dark:text-purple-400 mb-1">Trips</p>
-                            <p className="text-xl font-black text-purple-900 dark:text-purple-300">{dbData.todayOrders}</p>
-                        </div>
-                    </div>
-
-                    <div className="bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700 rounded-2xl p-6 mb-5 h-64 flex flex-col justify-center items-center text-center">
-                         <span dangerouslySetInnerHTML={{ __html: getIcon('barChart', 48, 'text-slate-300 dark:text-slate-600 mb-2') }} />
-                         <p className="text-sm font-bold text-slate-500 dark:text-slate-400">Dynamic <span className="capitalize text-brand-600">{perfPeriod}</span> Chart Area</p>
-                         <p className="text-xs text-slate-400 mt-1">Ready for Chart.js rendering</p>
-                    </div>
-
-                    <div className="grid grid-cols-3 gap-2">
-                        <div className="bg-amber-50 dark:bg-amber-900/20 rounded-xl p-3 border border-amber-200 dark:border-amber-800">
-                            <p className="text-[10px] text-amber-700 dark:text-amber-400 mb-1 font-bold uppercase">Avg/Trip</p>
-                            <p className="text-lg font-black text-amber-800 dark:text-amber-300">
-                                {/* 🔥 Dynamically calculates real average based on earnings & trips */}
-                                ₹{dbData.todayOrders > 0 ? (dbData.todayEarnings / dbData.todayOrders).toFixed(0) : 0}
-                            </p>
-                        </div>
-                        <div className="bg-rose-50 dark:bg-rose-900/20 rounded-xl p-3 border border-rose-200 dark:border-rose-800">
-                            <p className="text-[10px] text-rose-700 dark:text-rose-400 mb-1 font-bold uppercase">Distance</p>
-                            <p className="text-lg font-black text-rose-800 dark:text-rose-300">
-                                {/* Dynamic placeholder based on trips */}
-                                {dbData.todayOrders * 4}km
-                            </p>
-                        </div>
-                        <div className="bg-sky-50 dark:bg-sky-900/20 rounded-xl p-3 border border-sky-200 dark:border-sky-800">
-                            <p className="text-[10px] text-sky-700 dark:text-sky-400 mb-1 font-bold uppercase">Hours</p>
-                            <p className="text-lg font-black text-sky-800 dark:text-sky-300">
-                                {/* Dynamic placeholder based on trips */}
-                                {(dbData.todayOrders * 0.5).toFixed(1)}hrs
-                            </p>
-                        </div>
-                    </div>
-                </div>
-            );
-        }
-        else if (activeModal === 'leaderboard') {
-            content = (
-                <div>
-                    <h2 className="text-xl font-bold mb-4 dark:text-white flex items-center gap-2">
-                        <span dangerouslySetInnerHTML={{ __html: getIcon('award', 24, 'text-yellow-600') }} /> {t('leaderboard')}
-                    </h2>
-                    <div className="space-y-2 max-h-96 overflow-y-auto pr-2">
-                        {/* 🔥 USING REAL DB LEADERBOARD NOW */}
-                        {leaderboard.length > 0 ? leaderboard.map(driver => (
-                            <div key={driver.rank} className={`p-4 rounded-xl ${driver.isMe ? 'bg-brand-50 dark:bg-brand-900/20 border-2 border-brand-500' : 'bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700'} flex items-center gap-3`}>
-                                <div className={`w-10 h-10 rounded-full ${driver.rank <= 3 ? 'bg-gradient-to-br from-yellow-400 to-yellow-600 text-white' : 'bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-300'} flex items-center justify-center font-black`}>
-                                    {driver.rank <= 3 ? <span dangerouslySetInnerHTML={{ __html: getIcon('trophy', 20) }} /> : driver.rank}
-                                </div>
-                                <div className="flex-1">
-                                    <h3 className="font-bold text-slate-900 dark:text-white">{driver.name}</h3>
-                                    <p className="text-xs text-slate-600 dark:text-slate-400">{driver.trips} trips • ₹{driver.earnings}</p>
-                                </div>
-                                <div className="text-sm font-bold text-slate-500 dark:text-slate-400">#{driver.rank}</div>
-                            </div>
-                        )) : (
-                            <p className="text-center text-slate-500 py-10">Loading Leaderboard...</p>
-                        )}
-                    </div>
-                </div>
-            );
-        }
-
-        else if (activeModal === 'notifications') {
-            const toggleKey = (k) => setNotifSettings(prev => ({...prev, [k]: !prev[k]}));
-            content = (
-                <div>
-                    <h2 className="text-xl font-bold mb-4 dark:text-white flex items-center gap-2">
-                        <span dangerouslySetInnerHTML={{ __html: getIcon('bell', 24, 'text-brand-600') }} /> {t('notification_settings')}
-                    </h2>
-                    <div className="space-y-3">
-                        {Object.keys(notifSettings).map(key => (
-                            <div key={key} className="flex items-center justify-between p-4 bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700">
-                                <span className="font-semibold text-slate-900 dark:text-white capitalize">{key.replace(/([A-Z])/g, ' $1').trim()}</span>
-                                <div onClick={() => toggleKey(key)} className={`w-12 h-6 ${notifSettings[key] ? 'bg-brand-500' : 'bg-slate-300 dark:bg-slate-700'} rounded-full relative transition-colors cursor-pointer`}>
-                                    <div className={`absolute top-1 left-1 w-4 h-4 bg-white rounded-full transition-transform ${notifSettings[key] ? 'translate-x-6' : ''}`}></div>
-                                </div>
-                            </div>
-                        ))}
-                    </div>
-                </div>
-            );
-        }
-        else if (activeModal === 'support') {
-            content = (
-                <div>
-                    <h2 className="text-xl font-bold mb-4 dark:text-white flex items-center gap-2">
-                        <span dangerouslySetInnerHTML={{ __html: getIcon('helpCircle', 24, 'text-green-600') }} /> {t('support')}
-                    </h2>
-                    <div className="space-y-3">
-                        <button className="w-full p-4 bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 flex items-center justify-between hover:bg-slate-50 dark:hover:bg-slate-700">
-                            <span className="font-semibold text-slate-900 dark:text-white">{t('faq')}</span>
-                            <span dangerouslySetInnerHTML={{ __html: getIcon('arrowRight', 18, 'text-slate-400') }} />
-                        </button>
-                        <button className="w-full p-4 bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 flex items-center justify-between hover:bg-slate-50 dark:hover:bg-slate-700">
-                            <span className="font-semibold text-slate-900 dark:text-white">{t('contact_support')}</span>
-                            <span dangerouslySetInnerHTML={{ __html: getIcon('arrowRight', 18, 'text-slate-400') }} />
-                        </button>
-                        <button className="w-full p-4 bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 flex items-center justify-between hover:bg-slate-50 dark:hover:bg-slate-700">
-                            <span className="font-semibold text-slate-900 dark:text-white">{t('help_center')}</span>
-                            <span dangerouslySetInnerHTML={{ __html: getIcon('arrowRight', 18, 'text-slate-400') }} />
-                        </button>
-                        <div className="p-4 bg-green-50 dark:bg-green-900/20 rounded-xl border border-green-200 dark:border-green-800">
-                            <p className="text-sm text-green-700 dark:text-green-400 mb-2 font-semibold">24/7 Support Available</p>
-                            <a href="tel:+911800123456" className="text-2xl font-black text-green-600 dark:text-green-400">1800-123-456</a>
-                        </div>
-                    </div>
-                </div>
-            );
-        }
-        else if (activeModal === 'emergency') {
-            content = (
-                <div className="text-center">
-                    <h2 className="text-xl font-bold mb-4 text-red-600 flex items-center justify-center gap-2">
-                        <span dangerouslySetInnerHTML={{ __html: getIcon('alertCircle', 24, 'text-red-600') }} /> {t('emergency')} SOS
-                    </h2>
-                    <div className="bg-red-50 dark:bg-red-900/20 rounded-2xl p-6 border-2 border-red-200 dark:border-red-800 mb-4 text-center">
-                        <p className="text-sm text-red-700 dark:text-red-400 mb-4">{t('emergency_help')}</p>
-                        <button onClick={() => { showToast('Alerting emergency contacts!'); setActiveModal(null); }} className="w-full py-4 bg-red-600 hover:bg-red-700 text-white rounded-xl font-black text-lg flex items-center justify-center gap-2 active:scale-95 transition-transform">
-                            <span dangerouslySetInnerHTML={{ __html: getIcon('phone', 24) }} /> TRIGGER SOS
-                        </button>
-                    </div>
-                    <div className="space-y-2">
-                        <a href="tel:112" className="block p-3 bg-slate-100 dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 font-bold text-slate-900 dark:text-white">📞 Police (112)</a>
-                        <a href="tel:102" className="block p-3 bg-slate-100 dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 font-bold text-slate-900 dark:text-white">🚑 Ambulance (102)</a>
-                    </div>
-                </div>
-            );
-        }
         else if (activeModal === 'vehicle') {
-            content = (
+             content = (
                 <div>
                     <h2 className="text-xl font-bold mb-4 dark:text-white flex items-center gap-2">
-                        <span dangerouslySetInnerHTML={{ __html: getIcon('truck', 24, 'text-brand-600') }} /> {t('vehicle_info')}
+                        <span dangerouslySetInnerHTML={{ __html: getIcon('truck', 24, 'text-brand-600') }} /> Vehicle Info
                     </h2>
                     <div className="space-y-4">
                         <div className="bg-gradient-to-br from-brand-50 to-blue-50 dark:from-brand-900/20 dark:to-blue-900/20 rounded-2xl p-5 border-2 border-brand-200 dark:border-brand-800">
@@ -505,6 +436,87 @@ export default function ProfileSection({ t, setView, regData = {} }) {
                 </div>
             );
         }
+        else if (activeModal === 'referral') {
+             content = (
+                <div>
+                    <h2 className="text-xl font-bold mb-4 dark:text-white flex items-center gap-2">
+                        <span dangerouslySetInnerHTML={{ __html: getIcon('gift', 24, 'text-amber-600') }} /> Refer & Earn
+                    </h2>
+                    <div className="bg-gradient-to-br from-amber-50 to-orange-50 dark:from-amber-900/20 dark:to-orange-900/20 rounded-2xl p-6 border-2 border-amber-200 dark:border-amber-800 mb-4">
+                        <p className="text-sm text-amber-700 dark:text-amber-400 mb-2 font-semibold">Your Code</p>
+                        <div className="flex items-center gap-2 mb-3">
+                            <div className="flex-1 bg-white dark:bg-slate-800 rounded-lg p-3 font-mono text-2xl font-black text-amber-600 dark:text-amber-400 text-center">
+                                {dbData.referralCode}
+                            </div>
+                            <button onClick={() => { navigator.clipboard.writeText(dbData.referralCode); showToast('Copied!'); }} className="p-3 bg-amber-600 text-white rounded-lg hover:bg-amber-700 active:scale-95 transition-transform" dangerouslySetInnerHTML={{ __html: getIcon('copy', 20) }} />
+                        </div>
+                        <p className="text-xs text-amber-600 dark:text-amber-400">Share with your friends to earn!</p>
+                    </div>
+                </div>
+            );
+        }
+        else if (activeModal === 'notifications') {
+            const toggleKey = (k) => setNotifSettings(prev => ({...prev, [k]: !prev[k]}));
+            content = (
+                <div>
+                    <h2 className="text-xl font-bold mb-4 dark:text-white flex items-center gap-2">
+                        <span dangerouslySetInnerHTML={{ __html: getIcon('bell', 24, 'text-brand-600') }} /> Notifications
+                    </h2>
+                    <div className="space-y-3">
+                        {Object.keys(notifSettings).map(key => (
+                            <div key={key} className="flex items-center justify-between p-4 bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700">
+                                <span className="font-semibold text-slate-900 dark:text-white capitalize">{key.replace(/([A-Z])/g, ' $1').trim()}</span>
+                                <div onClick={() => toggleKey(key)} className={`w-12 h-6 ${notifSettings[key] ? 'bg-brand-500' : 'bg-slate-300 dark:bg-slate-700'} rounded-full relative transition-colors cursor-pointer`}>
+                                    <div className={`absolute top-1 left-1 w-4 h-4 bg-white rounded-full transition-transform ${notifSettings[key] ? 'translate-x-6' : ''}`}></div>
+                                </div>
+                            </div>
+                        ))}
+                    </div>
+                </div>
+            );
+        }
+        else if (activeModal === 'support') {
+             content = (
+                <div>
+                    <h2 className="text-xl font-bold mb-4 dark:text-white flex items-center gap-2">
+                        <span dangerouslySetInnerHTML={{ __html: getIcon('helpCircle', 24, 'text-green-600') }} /> Support
+                    </h2>
+                    <div className="space-y-3">
+                        <button className="w-full p-4 bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 flex items-center justify-between hover:bg-slate-50 dark:hover:bg-slate-700">
+                            <span className="font-semibold text-slate-900 dark:text-white">FAQs</span>
+                            <span dangerouslySetInnerHTML={{ __html: getIcon('arrowRight', 18, 'text-slate-400') }} />
+                        </button>
+                        <button className="w-full p-4 bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 flex items-center justify-between hover:bg-slate-50 dark:hover:bg-slate-700">
+                            <span className="font-semibold text-slate-900 dark:text-white">Contact Support</span>
+                            <span dangerouslySetInnerHTML={{ __html: getIcon('arrowRight', 18, 'text-slate-400') }} />
+                        </button>
+                        <div className="p-4 bg-green-50 dark:bg-green-900/20 rounded-xl border border-green-200 dark:border-green-800">
+                            <p className="text-sm text-green-700 dark:text-green-400 mb-2 font-semibold">24/7 Support Available</p>
+                            <a href="tel:+911800123456" className="text-2xl font-black text-green-600 dark:text-green-400">1800-123-456</a>
+                        </div>
+                    </div>
+                </div>
+            );
+        }
+        else if (activeModal === 'emergency') {
+             content = (
+                <div className="text-center">
+                    <h2 className="text-xl font-bold mb-4 text-red-600 flex items-center justify-center gap-2">
+                        <span dangerouslySetInnerHTML={{ __html: getIcon('alertCircle', 24, 'text-red-600') }} /> Emergency SOS
+                    </h2>
+                    <div className="bg-red-50 dark:bg-red-900/20 rounded-2xl p-6 border-2 border-red-200 dark:border-red-800 mb-4 text-center">
+                        <p className="text-sm text-red-700 dark:text-red-400 mb-4">Pressing this will alert your emergency contacts instantly.</p>
+                        <button onClick={() => { showToast('Alerting emergency contacts!'); setActiveModal(null); }} className="w-full py-4 bg-red-600 hover:bg-red-700 text-white rounded-xl font-black text-lg flex items-center justify-center gap-2 active:scale-95 transition-transform">
+                            <span dangerouslySetInnerHTML={{ __html: getIcon('phone', 24) }} /> TRIGGER SOS
+                        </button>
+                    </div>
+                    <div className="space-y-2">
+                        <a href="tel:112" className="block p-3 bg-slate-100 dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 font-bold text-slate-900 dark:text-white">📞 Police (112)</a>
+                        <a href="tel:102" className="block p-3 bg-slate-100 dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 font-bold text-slate-900 dark:text-white">🚑 Ambulance (102)</a>
+                    </div>
+                </div>
+            );
+        }
 
         return (
             <div className="fixed inset-0 z-[100] flex flex-col justify-end">
@@ -520,24 +532,27 @@ export default function ProfileSection({ t, setView, regData = {} }) {
 
     return (
         <div className="fade-in pt-4 pb-20 px-6">
-            {/* 1. Profile Header */}
-            <div className="flex items-center gap-4 mb-8">
+            
+            {fetchError && (
+                <div className="bg-red-50 border border-red-200 text-red-700 p-4 mb-4 rounded-2xl text-xs font-bold shadow-sm">
+                    ⚠️ DATABASE ERROR:<br/>{fetchError}
+                </div>
+            )}
+
+            <div className="flex items-center gap-4 mb-6 mt-2">
                 <div className="relative group">
                     <div className="w-20 h-20 rounded-full bg-slate-200 dark:bg-slate-700 flex items-center justify-center overflow-hidden border-2 border-white dark:border-slate-600 shadow-md">
-                        {regData.facePhoto 
-                            ? <img src={regData.facePhoto} className="w-full h-full object-cover" alt="Profile" /> 
+                        {/* 🔥 FIXED: Now fetches the DB avatarUrl instead of a ghost file */}
+                        {dbData.avatarUrl 
+                            ? <img src={dbData.avatarUrl} className="w-full h-full object-cover" alt="Profile" /> 
                             : <span dangerouslySetInnerHTML={{ __html: getIcon('user', 40, 'text-slate-400') }} />
                         }
                     </div>
-                    <label className="absolute bottom-0 right-0 bg-slate-800 text-white p-1.5 rounded-full shadow-lg cursor-pointer hover:scale-110 transition-transform">
-                        <span dangerouslySetInnerHTML={{ __html: getIcon('camera', 12) }} />
-                        <input type="file" accept="image/*" className="hidden" />
-                    </label>
                 </div>
                 <div>
                     <div className="flex items-center gap-2">
                         <h2 className="text-xl font-bold text-slate-900 dark:text-white">{dbData.fullName}</h2>
-                        {isPrime && (
+                        {isPilot && (
                             <div className="crown-shine inline-block text-amber-500" dangerouslySetInnerHTML={{ __html: getIcon('crown', 20) }} />
                         )}
                     </div>
@@ -548,95 +563,78 @@ export default function ProfileSection({ t, setView, regData = {} }) {
                 </div>
             </div>
 
-            {/* 2. Today's Stats Cards */}
             <div className="grid grid-cols-2 gap-3 mb-6">
                 <div className="bg-gradient-to-br from-blue-50 to-blue-100 dark:from-blue-900/20 dark:to-blue-800/20 rounded-2xl p-4 border border-blue-200 dark:border-blue-800">
                     <div className="flex items-center gap-2 mb-2">
                         <span dangerouslySetInnerHTML={{ __html: getIcon('barChart', 16, 'text-blue-600 dark:text-blue-400') }} />
-                        <span className="text-xs font-bold text-blue-600 dark:text-blue-400">{t('today_stats')}</span>
+                        <span className="text-xs font-bold text-blue-600 dark:text-blue-400">Total Stats</span>
                     </div>
                     <p className="text-2xl font-black text-blue-700 dark:text-blue-300">{dbData.todayOrders}</p>
-                    <p className="text-xs text-blue-600 dark:text-blue-400">{t('trips')}</p>
+                    <p className="text-xs text-blue-600 dark:text-blue-400">Trips</p>
                 </div>
                 <div className="bg-gradient-to-br from-green-50 to-green-100 dark:from-green-900/20 dark:to-green-800/20 rounded-2xl p-4 border border-green-200 dark:border-green-800">
                     <div className="flex items-center gap-2 mb-2">
                         <span dangerouslySetInnerHTML={{ __html: getIcon('wallet', 16, 'text-green-600 dark:text-green-400') }} />
-                        <span className="text-xs font-bold text-green-600 dark:text-green-400">{t('todays_earnings')}</span>
+                        <span className="text-xs font-bold text-green-600 dark:text-green-400">Total Earnings</span>
                     </div>
                     <p className="text-2xl font-black text-green-700 dark:text-green-300">₹{dbData.todayEarnings}</p>
-                    <p className="text-xs text-green-600 dark:text-green-400">Earnings</p>
+                    <p className="text-xs text-green-600 dark:text-green-400">Total</p>
                 </div>
             </div>
 
-            {/* 3. Prime Partner Progress */}
-            <div className={`mb-6 rounded-3xl p-5 border-2 shadow-lg ${isPrime ? 'bg-gradient-to-br from-amber-50 via-yellow-50 to-amber-100 dark:from-amber-900/30 dark:via-yellow-900/20 dark:to-amber-800/30 border-amber-300 dark:border-amber-600 prime-glow' : 'bg-gradient-to-br from-slate-50 to-slate-100 dark:from-slate-800/50 dark:to-slate-700/50 border-slate-300 dark:border-slate-600'}`}>
+            {/* PILOT CARD */}
+            <div className={`mb-6 rounded-3xl p-5 border-2 shadow-lg ${isPilot ? 'bg-gradient-to-br from-amber-50 via-yellow-50 to-amber-100 dark:from-amber-900/30 dark:via-yellow-900/20 dark:to-amber-800/30 border-amber-300 dark:border-amber-600 prime-glow' : 'bg-gradient-to-br from-slate-50 to-slate-100 dark:from-slate-800/50 dark:to-slate-700/50 border-slate-300 dark:border-slate-600'}`}>
                 <div className="flex items-center justify-between mb-3">
                     <div className="flex items-center gap-3">
-                        <div className={`w-12 h-12 rounded-full flex items-center justify-center ${isPrime ? 'bg-gradient-to-br from-amber-400 to-yellow-500 text-white' : 'bg-slate-200 dark:bg-slate-700 text-slate-500'}`} dangerouslySetInnerHTML={{ __html: getIcon('crown', 24) }} />
+                        <div className={`w-12 h-12 rounded-full flex items-center justify-center ${isPilot ? 'bg-gradient-to-br from-amber-400 to-yellow-500 text-white' : 'bg-slate-200 dark:bg-slate-700 text-slate-500'}`} dangerouslySetInnerHTML={{ __html: getIcon('crown', 24) }} />
                         <div>
-                            <h3 className={`font-black text-base ${isPrime ? 'text-amber-700 dark:text-amber-400' : 'text-slate-700 dark:text-slate-300'}`}>{isPrime ? 'Prime Partner' : 'Normal Partner'}</h3>
-                            <p className={`text-xs font-semibold ${isPrime ? 'text-amber-600 dark:text-amber-500' : 'text-slate-500 dark:text-slate-400'}`}>{dbData.weeklyOrders} orders this week</p>
+                            <h3 className={`font-black text-base ${isPilot ? 'text-amber-700 dark:text-amber-400' : 'text-slate-700 dark:text-slate-300'}`}>{isPilot ? 'Pilot Partner' : 'Standard Partner'}</h3>
+                            <p className="text-xs font-semibold text-slate-500 dark:text-slate-400">{currentWeeklyOrders} orders this week</p>
                         </div>
                     </div>
-                    {isPrime ? (
+                    {isPilot ? (
                         <div className="relative overflow-hidden px-3 py-1.5 rounded-full bg-gradient-to-r from-amber-400 to-yellow-500 text-white font-bold text-xs">
-                            <div className="prime-shimmer absolute inset-0"></div>
-                            <span className="relative z-10">PRIME</span>
+                            <span className="relative z-10">PILOT</span>
                         </div>
                     ) : (
                         <div className="text-right">
                             <p className="text-xs font-semibold text-slate-600 dark:text-slate-400">Progress</p>
-                            <p className={`text-lg font-black ${progressPercent >= 50 ? 'text-amber-600' : 'text-slate-600'} dark:text-slate-300`}>{Math.round(progressPercent)}%</p>
+                            <p className="text-lg font-black text-slate-700 dark:text-slate-300">{Math.round(progressPercent)}%</p>
                         </div>
                     )}
                 </div>
                 
-                <div className="relative h-3 bg-white/50 dark:bg-slate-900/30 rounded-full overflow-hidden mb-2 border border-amber-200/50 dark:border-amber-700/50">
-                    <div className={`absolute top-0 left-0 h-full rounded-full progress-bar-animated ${isPrime ? 'bg-gradient-to-r from-amber-400 via-yellow-500 to-amber-500' : 'bg-gradient-to-r from-slate-400 to-slate-500'}`} style={{ width: `${progressPercent}%` }}>
-                        {isPrime && <div className="prime-shimmer absolute inset-0"></div>}
-                    </div>
+                <div className="relative h-3 bg-white/50 dark:bg-slate-900/30 rounded-full overflow-hidden mb-2 border border-slate-200 dark:border-slate-700">
+                    <div className={`absolute top-0 left-0 h-full rounded-full transition-all duration-1000 ${isPilot ? 'bg-gradient-to-r from-amber-400 via-yellow-500 to-amber-500' : 'bg-gradient-to-r from-brand-400 to-brand-500'}`} style={{ width: `${progressPercent}%` }}></div>
                 </div>
                 
-                {isPrime ? (
+                {isPilot ? (
                     <div className="flex items-center gap-2 text-amber-700 dark:text-amber-400">
                         <span dangerouslySetInnerHTML={{ __html: getIcon('check', 16) }} />
-                        <p className="text-sm font-bold">Congratulations! You're a Prime Partner! Enjoy exclusive benefits.</p>
+                        <p className="text-sm font-bold">Congratulations! You are a Pilot!</p>
                     </div>
                 ) : (
-                    <p className={`text-sm font-semibold ${progressPercent >= 50 ? 'text-amber-700 dark:text-amber-400' : 'text-slate-600 dark:text-slate-400'}`}>
-                        {ordersNeeded} more {ordersNeeded === 1 ? 'order' : 'orders'} to become a Prime Partner! 
+                    <p className="text-sm font-semibold text-slate-600 dark:text-slate-400">
+                        {ordersNeededForPilot} more {ordersNeededForPilot === 1 ? 'order' : 'orders'} to become a Pilot!
                     </p>
                 )}
             </div>
 
-            {/* Achievements & Referral Preview Buttons */}
+            {/* AVIATION RANK */}
             <button onClick={() => setActiveModal('achievements')} className="w-full mb-4 bg-gradient-to-r from-purple-50 to-pink-50 dark:from-purple-900/20 dark:to-pink-900/20 rounded-2xl p-4 border-2 border-purple-200 dark:border-purple-800 active:scale-95 transition-transform">
                 <div className="flex items-center justify-between">
                     <div className="flex items-center gap-3">
                         <span dangerouslySetInnerHTML={{ __html: getIcon('trophy', 20, 'text-purple-600 dark:text-purple-400') }} />
                         <div className="text-left">
-                            <p className="font-bold text-slate-900 dark:text-white">{t('achievements')}</p>
-                            <p className="text-xs text-slate-600 dark:text-slate-400">{achievements.filter(a => a.unlocked).length}/{achievements.length} {t('unlocked')}</p>
+                            <p className="font-bold text-slate-900 dark:text-white">Aviation Rank</p>
+                            <p className="text-xs font-bold text-purple-700 dark:text-purple-400">{currentRank.name} • View progression</p>
                         </div>
                     </div>
                     <span dangerouslySetInnerHTML={{ __html: getIcon('arrowRight', 18, 'text-purple-600 dark:text-purple-400') }} />
                 </div>
             </button>
 
-            <button onClick={() => setActiveModal('referral')} className="w-full mb-4 bg-gradient-to-r from-amber-50 to-orange-50 dark:from-amber-900/20 dark:to-orange-900/20 rounded-2xl p-4 border-2 border-amber-200 dark:border-amber-800 active:scale-95 transition-transform">
-                <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-3">
-                        <span dangerouslySetInnerHTML={{ __html: getIcon('gift', 20, 'text-amber-600 dark:text-amber-400') }} />
-                        <div className="text-left">
-                            <p className="font-bold text-slate-900 dark:text-white">Refer & Earn</p>
-                            <p className="text-xs text-slate-600 dark:text-slate-400">{dbData.referrals} referrals • ₹{dbData.referrals * 500} earned</p>
-                        </div>
-                    </div>
-                    <span dangerouslySetInnerHTML={{ __html: getIcon('arrowRight', 18, 'text-amber-600 dark:text-amber-400') }} />
-                </div>
-            </button>
-
-            {/* Toggles */}
+            {/* VOICE NARRATION TOGGLE */}
             <button onClick={() => setIsVoiceOn(!isVoiceOn)} className={`w-full mb-3 py-3.5 rounded-2xl font-bold border-2 ${isVoiceOn ? 'border-brand-500 bg-brand-50 dark:bg-brand-900/20 text-brand-600 dark:text-brand-400' : 'border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300'} hover:bg-slate-50 dark:hover:bg-slate-800 flex items-center justify-between px-6 active:scale-95 transition-all`}>
                 <span className="flex items-center gap-3">
                     <span dangerouslySetInnerHTML={{ __html: getIcon(isVoiceOn ? 'volumeUp' : 'volumeOff', 18) }} /> Voice Narration
@@ -646,12 +644,11 @@ export default function ProfileSection({ t, setView, regData = {} }) {
                 </div>
             </button>
 
-            {/* Wallet Summary Button */}
             <button onClick={() => setView && setView('wallet')} className="w-full mb-6 bg-slate-900 dark:bg-slate-800 rounded-2xl p-4 text-white flex justify-between items-center shadow-lg active:scale-95 transition-transform mt-3">
                 <div className="flex items-center gap-4">
                     <div className="w-10 h-10 rounded-full bg-white/10 flex items-center justify-center" dangerouslySetInnerHTML={{ __html: getIcon('wallet', 20) }} />
                     <div className="text-left">
-                        <p className="text-xs text-slate-400 font-bold uppercase">{t('wallet_bal')}</p>
+                        <p className="text-xs text-slate-400 font-bold uppercase">Wallet Balance</p>
                         <p className="font-black text-xl">₹{dbData.walletBalance}</p>
                     </div>
                 </div>
@@ -661,7 +658,7 @@ export default function ProfileSection({ t, setView, regData = {} }) {
             {/* Main Action List */}
             <div className="space-y-3">
                 <button onClick={() => setActiveModal('performance')} className="w-full py-3.5 rounded-2xl font-bold border-2 border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800 flex items-center gap-3 px-6 active:scale-95 transition-transform">
-                    <span dangerouslySetInnerHTML={{ __html: getIcon('trendingUp', 18) }} /> Performance
+                    <span dangerouslySetInnerHTML={{ __html: getIcon('trendingUp', 18) }} /> Performance Graph
                 </button>
                 <button onClick={() => setActiveModal('leaderboard')} className="w-full py-3.5 rounded-2xl font-bold border-2 border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800 flex items-center gap-3 px-6 active:scale-95 transition-transform">
                     <span dangerouslySetInnerHTML={{ __html: getIcon('award', 18) }} /> Leaderboard
@@ -670,16 +667,19 @@ export default function ProfileSection({ t, setView, regData = {} }) {
                     <span dangerouslySetInnerHTML={{ __html: getIcon('bell', 18) }} /> Notifications
                 </button>
                 <button onClick={() => setActiveModal('vehicle')} className="w-full py-3.5 rounded-2xl font-bold border-2 border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800 flex items-center gap-3 px-6 active:scale-95 transition-transform">
-                    <span dangerouslySetInnerHTML={{ __html: getIcon('truck', 18) }} /> {t('vehicle_info')}
+                    <span dangerouslySetInnerHTML={{ __html: getIcon('truck', 18) }} /> Vehicle Info
                 </button>
                 <button onClick={() => setActiveModal('docs')} className="w-full py-3.5 rounded-2xl font-bold border-2 border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800 flex items-center gap-3 px-6 active:scale-95 transition-transform">
                     <span dangerouslySetInnerHTML={{ __html: getIcon('file', 18) }} /> Documents
                 </button>
+                <button onClick={() => setActiveModal('referral')} className="w-full py-3.5 rounded-2xl font-bold border-2 border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800 flex items-center gap-3 px-6 active:scale-95 transition-transform">
+                    <span dangerouslySetInnerHTML={{ __html: getIcon('gift', 18) }} /> Refer & Earn
+                </button>
                 <button onClick={() => setActiveModal('bank')} className="w-full py-3.5 rounded-2xl font-bold border-2 border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800 flex items-center gap-3 px-6 active:scale-95 transition-transform">
-                    <span dangerouslySetInnerHTML={{ __html: getIcon('card', 18) }} /> {t('bank_acct')}
+                    <span dangerouslySetInnerHTML={{ __html: getIcon('card', 18) }} /> Bank Details
                 </button>
                 <button onClick={() => setActiveModal('support')} className="w-full py-3.5 rounded-2xl font-bold border-2 border-green-200 dark:border-green-800 text-green-600 dark:text-green-400 hover:bg-green-50 dark:hover:bg-green-900/20 flex items-center gap-3 px-6 active:scale-95 transition-transform">
-                    <span dangerouslySetInnerHTML={{ __html: getIcon('helpCircle', 18) }} /> {t('support')}
+                    <span dangerouslySetInnerHTML={{ __html: getIcon('helpCircle', 18) }} /> Help / Support
                 </button>
                 <button onClick={() => setActiveModal('emergency')} className="w-full py-3.5 rounded-2xl font-bold border-2 border-red-200 dark:border-red-800 bg-red-50 dark:bg-red-900/20 text-red-600 dark:text-red-400 hover:bg-red-100 flex items-center gap-3 px-6 active:scale-95 transition-transform">
                     <span dangerouslySetInnerHTML={{ __html: getIcon('alertCircle', 18) }} /> Emergency SOS
@@ -689,7 +689,6 @@ export default function ProfileSection({ t, setView, regData = {} }) {
                 </button>
             </div>
 
-            {/* Render the active Modal on top */}
             {renderModal()}
         </div>
     );

@@ -42,33 +42,21 @@ export default function RegistrationView({ regData, setRegData, handleRegister, 
   };
 
   const vehicleTypes = [
-    { id: '2wheeler', label: 'Bike', icon: 'truck' }, 
-    { id: '3wheeler', label: 'Auto', icon: 'truck' },
-    { id: '4wheeler', label: 'Car', icon: 'truck' },
-    { id: 'tempo', label: 'Tempo', icon: 'truck' },
-    { id: 'truck', label: 'Truck', icon: 'truck' }
+    { id: '2wheeler', label: '2 Wheeler', icon: 'truck' }, 
+    { id: '3wheeler', label: '3 Wheeler', icon: 'truck' },
+    { id: '4wheeler', label: '4 Wheeler', icon: 'truck' }
   ];
 
-  // 🔥 3. REAL-WORLD VEHICLE DATABASE
+  // 櫨 3. REAL-WORLD VEHICLE DATABASE
   const vehicleModelsData = {
       '3wheeler': [
           { id: '3w_ape', name: 'Piaggio Ape / Mahindra Alfa', weight: '500 kg', length: '5.5 ft' },
           { id: '3w_maxima', name: 'Bajaj Maxima C', weight: '600 kg', length: '5.5 ft' }
       ],
       '4wheeler': [
-          { id: '4w_ace', name: 'Tata Ace / Super Carry', weight: '750 kg', length: '7 ft' },
-          { id: '4w_jeeto', name: 'Mahindra Jeeto', weight: '600 kg', length: '6 ft' }
-      ],
-      'tempo': [
-          { id: 'tmp_dost', name: 'Ashok Leyland Dost / Bada Dost', weight: '1.25 Ton', length: '8 ft' },
-          { id: 'tmp_bolero', name: 'Mahindra Bolero Pickup', weight: '1.5 Ton', length: '9 ft' },
-          { id: 'tmp_intra', name: 'Tata Intra V30 / V50', weight: '1.3 Ton', length: '8.8 ft' }
-      ],
-      'truck': [
-          { id: 'trk_407', name: 'Tata 407 (10 ft)', weight: '2.5 Ton', length: '10 ft' },
-          { id: 'trk_14', name: '14 ft LCV Truck', weight: '4 Ton', length: '14 ft' },
-          { id: 'trk_17', name: '17 ft MCV Truck', weight: '5 Ton', length: '17 ft' },
-          { id: 'trk_20', name: '20 ft HCV Container', weight: '7 Ton', length: '20 ft' }
+          { id: '4w_small', name: 'Small LCV (e.g., Tata Ace Gold)', weight: '1200 kg', length: '7 ft' },
+          { id: '4w_medium', name: 'Medium LCV (e.g., Ashok Leyland Dost)', weight: '1700 kg', length: '8 ft' },
+          { id: '4w_large', name: 'Large LCV (e.g., Tata 407)', weight: '2500 kg', length: '10 ft' }
       ]
   };
 

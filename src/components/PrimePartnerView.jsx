@@ -1,27 +1,55 @@
-import React from 'react';
-import { ICONS } from '../config';
+import React, { useState, useEffect } from 'react';
+import { supabase, ICONS } from '../config';
 
 function getIcon(name, size = 24, classes = '') {
     return <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={classes} dangerouslySetInnerHTML={{ __html: ICONS[name] || '' }} />;
 }
 
-export default function PrimePartnerView({ weeklyOrders = 45, onClose }) {
-  const targetOrders = 60;
-  const isPrime = weeklyOrders >= targetOrders;
+// 🔥 ADDED regData prop so it can fetch data for the specific driver
+export default function PrimePartnerView({ regData, onClose }) {
+  const [weeklyOrders, setWeeklyOrders] = useState(0);
+  const [isLoading, setIsLoading] = useState(true);
+
+  // 🔥 PILOT TARGET LOGIC
+  const targetOrders = 50; 
+  const isPilot = weeklyOrders >= targetOrders;
   const progressPercent = Math.min(100, (weeklyOrders / targetOrders) * 100);
   const remaining = Math.max(0, targetOrders - weeklyOrders);
 
+  // 🔥 FETCH LIVE DATA FROM YOUR TABLE
+  useEffect(() => {
+    const fetchPilotData = async () => {
+      if (!regData?.mobile) {
+          setIsLoading(false);
+          return;
+      }
+      
+      const { data, error } = await supabase
+        .from('driver_details')
+        .select('weekly_orders_completed') // Fetching the correct column
+        .eq('mobile_number', regData.mobile)
+        .single();
+
+      if (data && !error) {
+         setWeeklyOrders(Number(data.weekly_orders_completed) || 0);
+      }
+      setIsLoading(false);
+    };
+
+    fetchPilotData();
+  }, [regData?.mobile]);
+
   const benefits = [
-    { id: 1, title: 'Higher Earnings', desc: 'Earn up to 15% more on every delivery.', icon: 'barChart', unlocked: isPrime },
-    { id: 2, title: 'Priority Support', desc: 'Skip the queue with a dedicated helpline.', icon: 'phone', unlocked: isPrime },
-    { id: 3, title: 'Health Insurance', desc: 'Free medical cover up to ₹2 Lakhs.', icon: 'alertCircle', unlocked: isPrime },
-    { id: 4, title: 'Zero Cancellation Penalty', desc: 'Cancel up to 2 orders/week penalty-free.', icon: 'check', unlocked: isPrime },
+    { id: 1, title: 'Higher Earnings', desc: 'Earn up to 15% more on every delivery.', icon: 'barChart', unlocked: isPilot },
+    { id: 2, title: 'Priority Support', desc: 'Skip the queue with a dedicated helpline.', icon: 'phone', unlocked: isPilot },
+    { id: 3, title: 'Health Insurance', desc: 'Free medical cover up to ₹2 Lakhs.', icon: 'alertCircle', unlocked: isPilot },
+    { id: 4, title: 'Zero Cancellation Penalty', desc: 'Cancel up to 2 orders/week penalty-free.', icon: 'check', unlocked: isPilot },
   ];
 
   return (
     <div className="fixed inset-0 z-[110] bg-slate-50 dark:bg-dark-bg flex flex-col slide-up overflow-hidden">
       
-      {/* Golden Header Header */}
+      {/* Golden Header */}
       <div className="relative pt-safe-top pb-10 bg-gradient-to-b from-amber-500 to-amber-600 dark:from-amber-600 dark:to-amber-800 rounded-b-[3rem] shadow-xl px-6">
         <div className="absolute top-0 right-0 opacity-10 pointer-events-none transform translate-x-1/4 -translate-y-1/4">
           {getIcon('crown', 200, 'text-white')}
@@ -31,7 +59,7 @@ export default function PrimePartnerView({ weeklyOrders = 45, onClose }) {
           <button onClick={onClose} className="w-10 h-10 bg-white/20 rounded-full flex items-center justify-center text-white backdrop-blur-md active:scale-95">
             {getIcon('arrowLeft', 24)}
           </button>
-          <span className="text-white font-bold uppercase tracking-widest text-xs bg-black/20 px-3 py-1 rounded-full backdrop-blur-md">QC Logistics Elite</span>
+          <span className="text-white font-bold uppercase tracking-widest text-xs bg-black/20 px-3 py-1 rounded-full backdrop-blur-md">QC Logistics</span>
           <div className="w-10"></div>
         </div>
 
@@ -39,7 +67,7 @@ export default function PrimePartnerView({ weeklyOrders = 45, onClose }) {
           <div className="w-20 h-20 bg-white/20 rounded-full flex items-center justify-center mx-auto mb-4 backdrop-blur-md border-2 border-white/50 shadow-inner">
             {getIcon('crown', 40, 'text-yellow-300 drop-shadow-md')}
           </div>
-          <h1 className="text-3xl font-black mb-1 drop-shadow-md">Prime Partner</h1>
+          <h1 className="text-3xl font-black mb-1 drop-shadow-md">Pilot Partner</h1>
           <p className="text-amber-100 text-sm">Unlock exclusive benefits and maximum earnings.</p>
         </div>
       </div>
@@ -51,29 +79,31 @@ export default function PrimePartnerView({ weeklyOrders = 45, onClose }) {
           <div className="flex justify-between items-end mb-4">
             <div>
               <p className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-1">Current Status</p>
-              <h2 className={`text-xl font-black ${isPrime ? 'text-amber-500' : 'text-slate-900 dark:text-white'}`}>
-                {isPrime ? 'Active Prime Member' : 'Regular Partner'}
+              <h2 className={`text-xl font-black ${isPilot ? 'text-amber-500' : 'text-slate-900 dark:text-white'}`}>
+                {isPilot ? 'Active Pilot' : 'Standard Partner'}
               </h2>
             </div>
             <div className="text-right">
-              <span className="text-2xl font-black text-slate-900 dark:text-white">{weeklyOrders}</span>
+              <span className="text-2xl font-black text-slate-900 dark:text-white">
+                  {isLoading ? '...' : weeklyOrders}
+              </span>
               <span className="text-sm font-bold text-slate-400">/{targetOrders} trips</span>
             </div>
           </div>
 
           <div className="relative h-4 bg-slate-100 dark:bg-slate-700 rounded-full overflow-hidden mb-3">
-            <div className={`absolute top-0 left-0 h-full rounded-full transition-all duration-1000 ${isPrime ? 'bg-gradient-to-r from-amber-400 to-yellow-500 prime-shimmer' : 'bg-brand-500'}`} style={{ width: `${progressPercent}%` }}></div>
+            <div className={`absolute top-0 left-0 h-full rounded-full transition-all duration-1000 ${isPilot ? 'bg-gradient-to-r from-amber-400 to-yellow-500 prime-shimmer' : 'bg-brand-500'}`} style={{ width: `${progressPercent}%` }}></div>
           </div>
 
           <p className="text-sm font-semibold text-slate-500 dark:text-slate-400">
-            {isPrime 
-              ? "🎉 You've unlocked Prime for this week!" 
-              : `Complete ${remaining} more trips before Sunday to unlock Prime benefits next week.`}
+            {isPilot 
+              ? "🎉 You've unlocked Pilot benefits for this week!" 
+              : `Complete ${remaining} more trips before Sunday to unlock Pilot benefits.`}
           </p>
         </div>
 
         {/* Benefits List */}
-        <h3 className="font-bold text-slate-900 dark:text-white mb-4">Prime Benefits</h3>
+        <h3 className="font-bold text-slate-900 dark:text-white mb-4">Pilot Benefits</h3>
         <div className="space-y-3">
           {benefits.map(benefit => (
             <div key={benefit.id} className={`p-4 rounded-2xl flex items-center gap-4 transition-colors ${benefit.unlocked ? 'bg-gradient-to-r from-amber-50 to-orange-50 dark:from-amber-900/20 dark:to-orange-900/20 border-2 border-amber-200 dark:border-amber-800/50' : 'bg-white dark:bg-slate-800 border border-slate-100 dark:border-slate-700 opacity-75'}`}>
