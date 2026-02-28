@@ -5,18 +5,17 @@ function getIcon(name, size = 24, classes = '') {
     return <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={classes} dangerouslySetInnerHTML={{ __html: ICONS[name] || '' }} />;
 }
 
-// 🔥 ADDED regData prop so it can fetch data for the specific driver
 export default function PrimePartnerView({ regData, onClose }) {
   const [weeklyOrders, setWeeklyOrders] = useState(0);
   const [isLoading, setIsLoading] = useState(true);
 
-  // 🔥 PILOT TARGET LOGIC
+  // PILOT TARGET LOGIC
   const targetOrders = 50; 
   const isPilot = weeklyOrders >= targetOrders;
   const progressPercent = Math.min(100, (weeklyOrders / targetOrders) * 100);
   const remaining = Math.max(0, targetOrders - weeklyOrders);
 
-  // 🔥 FETCH LIVE DATA FROM YOUR TABLE
+  // 🔥 FETCH LIVE DATA USING JOINED TABLES
   useEffect(() => {
     const fetchPilotData = async () => {
       if (!regData?.mobile) {
@@ -24,14 +23,22 @@ export default function PrimePartnerView({ regData, onClose }) {
           return;
       }
       
+      let safeMobile = String(regData.mobile).replace(/\D/g, '').slice(-10);
+
+      // We pull the driver identity, and then grab their attached stats
       const { data, error } = await supabase
-        .from('driver_details')
-        .select('weekly_orders_completed') // Fetching the correct column
-        .eq('mobile_number', regData.mobile)
+        .from('driver_profiles')
+        .select(`
+            id,
+            driver_stats (weekly_orders_completed)
+        `)
+        .eq('mobile_number', safeMobile)
         .single();
 
       if (data && !error) {
-         setWeeklyOrders(Number(data.weekly_orders_completed) || 0);
+         // Safely navigate the returned joined object
+         const wOrders = data.driver_stats?.[0]?.weekly_orders_completed || data.driver_stats?.weekly_orders_completed || 0;
+         setWeeklyOrders(Number(wOrders));
       }
       setIsLoading(false);
     };

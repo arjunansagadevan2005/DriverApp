@@ -10,6 +10,9 @@ export default function EarningsSection({ t, regData }) {
     const [selectedDate, setSelectedDate] = useState('');
     const [pastTrips, setPastTrips] = useState([]);
     const [isLoading, setIsLoading] = useState(true);
+    
+    // 🔥 NEW: State to hold the relational UUID
+    const [driverUuid, setDriverUuid] = useState(null);
 
     // --- 1. SET THE CALENDAR DATE AUTOMATICALLY ---
     useEffect(() => {
@@ -18,7 +21,7 @@ export default function EarningsSection({ t, regData }) {
             const y = today.getFullYear();
             const m = String(today.getMonth() + 1).padStart(2, '0');
             const d = String(today.getDate()).padStart(2, '0');
-            setSelectedDate(`${y}-${m}-${d}`); // Sets to e.g., 2026-02-24
+            setSelectedDate(`${y}-${m}-${d}`);
         } else if (timeframe === 'weekly') {
             const date = new Date(today.getTime());
             date.setHours(0, 0, 0, 0);
@@ -35,16 +38,32 @@ export default function EarningsSection({ t, regData }) {
         }
     }, [timeframe]);
 
-    // --- 2. FETCH ONLY SELECTED DATE FROM SUPABASE ---
+    // --- 2. GET DRIVER UUID FIRST ---
+    useEffect(() => {
+        const fetchDriverId = async () => {
+            if (!regData?.mobile) return;
+            let safeMobile = String(regData.mobile).replace(/\D/g, '').slice(-10);
+            
+            const { data } = await supabase
+                .from('driver_profiles')
+                .select('id')
+                .eq('mobile_number', safeMobile)
+                .single();
+                
+            if (data) setDriverUuid(data.id);
+        };
+        fetchDriverId();
+    }, [regData?.mobile]);
+
+    // --- 3. FETCH COMPLETED TRIPS USING UUID ---
     useEffect(() => {
         const fetchTrips = async () => {
-            if (!regData?.mobile || !selectedDate) return;
+            if (!driverUuid || !selectedDate) return;
             setIsLoading(true);
 
             let startDateStr, endDateStr;
 
             try {
-                // Determine exact start and end times for the selected calendar date
                 if (timeframe === 'daily') {
                     const start = new Date(`${selectedDate}T00:00:00`);
                     const end = new Date(`${selectedDate}T23:59:59.999`);
@@ -83,11 +102,11 @@ export default function EarningsSection({ t, regData }) {
                     endDateStr = end.toISOString();
                 }
 
-                // Query Supabase directly with the exact date bounds
+                // 🔥 NEW: Uses the securely fetched driver_id instead of driver_number
                 let query = supabase
-                    .from('orders')
+                    .from('driver_orders')
                     .select('*')
-                    .eq('driver_number', regData.mobile)
+                    .eq('driver_id', driverUuid) 
                     .ilike('status', 'Completed');
 
                 if (startDateStr && endDateStr) {
@@ -103,7 +122,7 @@ export default function EarningsSection({ t, regData }) {
                         amount: order.delivery_fee || order.total_amount || 0,
                         date: new Date(order.created_at).toLocaleString('en-IN', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
                     }));
-                    setPastTrips(formattedTrips); // Displays exactly what the database sends back
+                    setPastTrips(formattedTrips); 
                 } else {
                     setPastTrips([]);
                 }
@@ -116,9 +135,8 @@ export default function EarningsSection({ t, regData }) {
         };
 
         fetchTrips();
-    }, [timeframe, selectedDate, regData?.mobile]); // Triggers instantly when you change the date picker
+    }, [timeframe, selectedDate, driverUuid]); // Triggered perfectly when driverUuid loads
 
-    // Calculate total purely based on the fetched trips
     const total = pastTrips.reduce((acc, curr) => acc + Number(curr.amount), 0);
     const inputClasses = "w-full bg-slate-50 dark:bg-slate-800 border-2 border-slate-200 dark:border-slate-700 rounded-xl py-3 px-4 text-sm font-bold text-slate-700 dark:text-slate-300 focus:outline-none focus:border-brand-500 transition-colors cursor-pointer shadow-sm";
 

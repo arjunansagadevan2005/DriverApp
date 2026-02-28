@@ -1,13 +1,14 @@
-import React from 'react';
-import { ICONS } from '../config';
+import React, { useState } from 'react';
+import { supabase, ICONS } from '../config'; 
 
 // Helper to render icons safely
 function getIcon(name, size = 24, classes = '') {
     return <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={classes} dangerouslySetInnerHTML={{ __html: ICONS[name] || '' }} />;
 }
 
-export default function RegistrationView({ regData, setRegData, handleRegister, loading }) {
-  
+export default function RegistrationView({ regData, setRegData, setView }) {
+  const [loading, setLoading] = useState(false);
+
   const handleFileChange = (e, field) => {
     const file = e.target.files[0];
     if (file) setRegData(prev => ({ ...prev, [field]: file }));
@@ -17,20 +18,18 @@ export default function RegistrationView({ regData, setRegData, handleRegister, 
     setRegData(prev => ({ ...prev, [field]: value }));
   };
 
-  // 🔥 1. Reset specific details when switching main vehicle category
   const handleCategoryChange = (categoryId) => {
     setRegData(prev => ({
         ...prev,
         vehicleType: categoryId,
-        specificModelId: '', // Reset specific model
+        specificModelId: '', 
         vehicleModelName: '',
         vehicleWeight: '',
         vehicleDimensions: '',
-        bodyType: '' // Reset body type
+        bodyType: '' 
     }));
   };
 
-  // 🔥 2. Handle specific vehicle model selection
   const handleSpecificModelSelect = (model) => {
       setRegData(prev => ({
           ...prev,
@@ -41,13 +40,148 @@ export default function RegistrationView({ regData, setRegData, handleRegister, 
       }));
   };
 
+  // 🔥 SUPABASE UPLOAD HELPER (Using 'driver_document' singular)
+  const uploadFileToSupabase = async (file, pathPrefix) => {
+      if (!file) return null;
+      
+      const fileExt = file.name.split('.').pop();
+      const fileName = `${pathPrefix}-${Date.now()}.${fileExt}`;
+      
+      const { data, error } = await supabase.storage
+          .from('driver_document')
+          .upload(fileName, file);
+
+      if (error) {
+          console.error(`Upload error for ${pathPrefix}:`, error.message);
+          return null;
+      }
+
+      const { data: publicUrlData } = supabase.storage
+          .from('driver_document')
+          .getPublicUrl(fileName);
+
+      return publicUrlData.publicUrl;
+  };
+
+  // 🔥 THE MAIN REGISTRATION SUBMIT FUNCTION
+  const submitRegistration = async (e) => {
+      e.preventDefault();
+      
+      if (!regData.mobile) {
+          alert("Error: Mobile number is missing. Please restart registration.");
+          return;
+      }
+
+      setLoading(true);
+
+      try {
+          // 1. Upload Files to Storage
+          const avatarUrl = await uploadFileToSupabase(regData.avatarFile, 'avatars/avatar');
+          const aadharUrl = await uploadFileToSupabase(regData.aadharFile, 'docs/aadhar');
+          const panUrl = await uploadFileToSupabase(regData.panFile, 'docs/pan');
+          const licenseUrl = await uploadFileToSupabase(regData.licenseFile, 'docs/license');
+          const rcUrl = await uploadFileToSupabase(regData.rcFile, 'docs/rc');
+
+          let safeMobile = String(regData.mobile).replace(/\D/g, '').slice(-10);
+
+          // 🔥 GENERATE UNIQUE DRIVER ID (e.g., DRV2005ARJ)
+          const birthYear = regData.dob ? new Date(regData.dob).getFullYear().toString() : new Date().getFullYear().toString();
+          const nameStr = regData.fullName && regData.fullName.trim().length > 0 ? regData.fullName.trim() : 'UNK';
+          const namePrefix = nameStr.substring(0, 3).toUpperCase().padEnd(3, 'X');
+          const generatedDriverId = `DRV${birthYear}${namePrefix}`;
+
+          // 2. Insert Core Profile
+          const { data: profileData, error: profileError } = await supabase
+              .from('driver_profiles')
+              .upsert([{
+                  mobile_number: safeMobile,
+                  full_name: regData.fullName,
+                  driver_id: generatedDriverId, // Saves custom ID to DB
+                  dob: regData.dob,
+                  emergency_contact: regData.emergencyContact,
+                  blood_group: regData.bloodGroup,
+                  tshirt_size: regData.tshirtSize,
+                  preferred_zone: regData.preferredZone,
+                  avatar_url: avatarUrl,
+                  referral_code: regData.referralCode,
+                  is_online: false,
+                  status: 'offline',
+                  is_approved: false
+              }], { onConflict: 'mobile_number' })
+              .select().single();
+
+          if (profileError) throw profileError;
+          const driverUuid = profileData.id; // The UUID for foreign keys
+
+          // 3. Insert Vehicle Details (Changed to .insert to bypass the 400 Bad Request error)
+          await supabase.from('driver_vehicles').insert([{
+              driver_id: driverUuid,
+              vehicle_type: regData.vehicleType,
+              model_id: regData.specificModelId,
+              model_name: regData.vehicleModelName,
+              weight_capacity: regData.vehicleWeight,
+              dimensions: regData.vehicleDimensions,
+              body_type: regData.bodyType,
+              registration_number: regData.vehicleNumber
+          }]);
+
+          // 4. Insert Bank Details
+          await supabase.from('driver_bank_accounts').insert([{
+              driver_id: driverUuid,
+              account_holder_name: regData.accountHolder || regData.fullName,
+              account_number: regData.bankAccount,
+              ifsc_code: regData.ifscCode
+          }]);
+
+          // 5. Initialize Stats
+          await supabase.from('driver_stats').insert([{ 
+              driver_id: driverUuid 
+          }]);
+
+          // 6. Insert Documents into driver_documentss
+          const docs = [];
+          if (aadharUrl) docs.push({ driver_id: driverUuid, document_type: 'aadhar', file_url: aadharUrl });
+          if (panUrl) docs.push({ driver_id: driverUuid, document_type: 'pan', file_url: panUrl });
+          if (licenseUrl) docs.push({ driver_id: driverUuid, document_type: 'license', file_url: licenseUrl });
+          if (rcUrl) docs.push({ driver_id: driverUuid, document_type: 'rc', file_url: rcUrl });
+
+          if (docs.length > 0) {
+              await supabase.from('driver_documentss').insert(docs);
+          }
+
+          alert(`Registration Complete!\nYour Driver ID is: ${generatedDriverId}`);
+          
+          // 🔥 NEW: Save the session so the dashboard knows who is logged in!
+          const sessionData = { 
+              ...regData, 
+              mobile: safeMobile,
+              driverId: generatedDriverId,
+              uuid: driverUuid
+          };
+          localStorage.setItem('qc_driver_session', JSON.stringify(sessionData));
+          localStorage.setItem('qc_current_view', 'dashboard');
+          
+          // 🔥 NEW: Navigate to the Dashboard
+          if (setView) {
+              setView('dashboard');
+          } else {
+              window.location.reload(); 
+          }
+
+      } catch (error) {
+          console.error("Registration failed:", error);
+          alert("Registration failed: " + (error.message || "Please check your network connection and try again."));
+      } finally {
+          setLoading(false);
+      }
+  };
+
   const vehicleTypes = [
     { id: '2wheeler', label: '2 Wheeler', icon: 'truck' }, 
     { id: '3wheeler', label: '3 Wheeler', icon: 'truck' },
     { id: '4wheeler', label: '4 Wheeler', icon: 'truck' }
   ];
 
-  // 櫨 3. REAL-WORLD VEHICLE DATABASE
   const vehicleModelsData = {
       '3wheeler': [
           { id: '3w_ape', name: 'Piaggio Ape / Mahindra Alfa', weight: '500 kg', length: '5.5 ft' },
@@ -67,7 +201,6 @@ export default function RegistrationView({ regData, setRegData, handleRegister, 
     { key: 'rcFile', label: 'RC Book' }
   ];
 
-  // Get the list of specific models to show based on the selected category
   const activeVehicleModels = vehicleModelsData[regData.vehicleType];
 
   return (
@@ -80,7 +213,8 @@ export default function RegistrationView({ regData, setRegData, handleRegister, 
             <p className="text-sm text-slate-500 dark:text-slate-400">Fill in your details to start earning</p>
         </div>
 
-        <form onSubmit={handleRegister} className="space-y-6">
+        {/* FORM */}
+        <form onSubmit={submitRegistration} className="space-y-6">
             
             {/* PROFILE PHOTO UPLOAD */}
             <div className="text-center pb-4">
@@ -109,6 +243,12 @@ export default function RegistrationView({ regData, setRegData, handleRegister, 
                 <input type="text" placeholder="Full Name (as per Bank)" required className="reg-input w-full p-4 rounded-2xl bg-slate-50 dark:bg-slate-900 border-2 border-transparent focus:border-brand-500 outline-none dark:text-white" 
                     value={regData.fullName || ''} onChange={(e) => updateField('fullName', e.target.value)} />
                 
+                <div className="relative">
+                    <label className="text-[10px] font-bold text-slate-400 uppercase ml-2 mb-1 block">Date of Birth</label>
+                    <input type="date" required className="reg-input w-full p-4 rounded-2xl bg-slate-50 dark:bg-slate-900 border-2 border-transparent focus:border-brand-500 outline-none dark:text-white" 
+                        value={regData.dob || ''} onChange={(e) => updateField('dob', e.target.value)} />
+                </div>
+
                 <input type="tel" placeholder="Emergency Contact Number" required className="reg-input w-full p-4 rounded-2xl bg-slate-50 dark:bg-slate-900 border-2 border-transparent focus:border-brand-500 outline-none dark:text-white" 
                     value={regData.emergencyContact || ''} onChange={(e) => updateField('emergencyContact', e.target.value)} />
 
@@ -150,7 +290,6 @@ export default function RegistrationView({ regData, setRegData, handleRegister, 
                     ))}
                 </div>
 
-                {/* 🔥 DYNAMIC VEHICLE LIST (Shows if they pick anything other than bike) */}
                 {activeVehicleModels && (
                     <div className="space-y-3 slide-down border-t border-slate-100 dark:border-slate-700 pt-4 mt-2">
                         <p className="text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-widest">Select Vehicle Model</p>
@@ -171,7 +310,6 @@ export default function RegistrationView({ regData, setRegData, handleRegister, 
                     </div>
                 )}
 
-                {/* 🔥 DYNAMIC BODY TYPE (Shows ONLY after they click a specific model) */}
                 {regData.specificModelId && (
                     <div className="space-y-2 slide-down pt-2">
                         <p className="text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-widest">Vehicle Body Type</p>

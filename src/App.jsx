@@ -9,17 +9,11 @@ import WalletView from './components/WalletView';
 import DashboardView from './components/DashboardView'; 
 
 function App() {
-  const [view, setView] = useState(() => {
-      return localStorage.getItem('qc_current_view') || 'welcome';
-  });
+  const [view, setView] = useState(() => localStorage.getItem('qc_current_view') || 'welcome');
   
   const [regData, setRegData] = useState(() => {
       const saved = localStorage.getItem('qc_driver_session');
-      return saved ? JSON.parse(saved) : { 
-          mobile: '', fullName: '', vehicleType: '', vehicleNumber: '', preferredZone: '',
-          tshirtSize: '', bloodGroup: '', emergencyContact: '', bankAccount: '', ifscCode: '',
-          accountHolder: '', avatarFile: null, aadharFile: null, panFile: null, rcFile: null, licenseFile: null
-      };
+      return saved ? JSON.parse(saved) : { mobile: '', fullName: '', dob: '' };
   });
 
   const [loading, setLoading] = useState(false);
@@ -39,82 +33,72 @@ function App() {
       return () => window.removeEventListener("languageChange", handleLanguageUpdate);
   }, []);
 
+  // --- LOGIN LOGIC (Send OTP) ---
   const handleLogin = (e) => {
     e.preventDefault();
     setLoading(true);
+    
+    // Simulate OTP generation (Check F12 console for the code)
     const mockOtp = Math.floor(1000 + Math.random() * 9000).toString();
-    console.log(`Target Mobile: ${regData.mobile} | Mock OTP: ${mockOtp}`);
+    console.log(`📲 Target Mobile: ${regData.mobile} | 🔑 Mock OTP: ${mockOtp}`);
+    
     setRegData(prev => ({ ...prev, generatedOtp: mockOtp }));
     setView('verification');
     setLoading(false);
   };
 
+  // --- VERIFICATION LOGIC (Check if user exists in driver_profiles) ---
   const handleVerify = async (e) => {
     e.preventDefault();
     setLoading(true);
 
     if (regData.otp === regData.generatedOtp) {
-      let safeMobile = String(regData.mobile).replace(/\D/g, '');
-      if (safeMobile.length > 10) safeMobile = safeMobile.slice(-10);
+      // Clean mobile number format
+      let safeMobile = String(regData.mobile).replace(/\D/g, '').slice(-10);
 
-      const { data, error } = await supabase.from('driver_details').select('*').eq('mobile_number', safeMobile).limit(1);
+      // 1. Check if user is already registered (using maybeSingle)
+      const { data: profileData, error } = await supabase
+          .from('driver_profiles')
+          .select('id, mobile_number, driver_id, full_name, avatar_url')
+          .eq('mobile_number', safeMobile)
+          .maybeSingle(); 
 
-      if (data && data.length > 0) {
+      if (profileData && !error) {
+        // ✅ USER EXISTS: Fetch their vehicle data and skip registration
+        const { data: vehicleData } = await supabase
+            .from('driver_vehicles')
+            .select('vehicle_type, registration_number')
+            .eq('driver_id', profileData.id)
+            .maybeSingle();
+
+        const safeVehicle = vehicleData || {};
+        
+        // Save full session so the Dashboard loads instantly with real data
         const sessionData = {
             ...regData,
-            mobile: data[0].mobile_number, 
-            fullName: data[0].full_name,
-            vehicleType: data[0].vehicle_type,
-            vehicleNumber: data[0].vehicle_number
+            mobile: profileData.mobile_number, 
+            fullName: profileData.full_name,
+            driverId: profileData.driver_id, // Gets your DRV2005ARJ id
+            uuid: profileData.id,
+            avatarUrl: profileData.avatar_url,
+            vehicleType: safeVehicle.vehicle_type || 'Not Set',
+            vehicleNumber: safeVehicle.registration_number || ''
         };
+        
         setRegData(sessionData);
         localStorage.setItem('qc_driver_session', JSON.stringify(sessionData));
         localStorage.setItem('qc_current_view', 'dashboard');
         
+        // Route straight to dashboard!
         setView('dashboard');
       } else {
+        // ❌ NEW USER: Profile not found, route to Registration Page
         setView('registration');
       }
     } else {
-      alert("Invalid OTP! Check F12 console for the code.");
+      alert("Invalid OTP! Check your F12 browser console for the mock code.");
     }
     setLoading(false);
-  };
-
-  const handleRegister = async (e) => {
-    e.preventDefault();
-    setLoading(true);
-    try {
-        const uploadFile = async (file, fileNamePrefix) => {
-            if (!file) return null;
-            const fileExt = file.name.split('.').pop();
-            const fileName = `${fileNamePrefix}-${regData.mobile}-${Date.now()}.${fileExt}`;
-            const { error } = await supabase.storage.from('driver_document').upload(fileName, file);
-            if (error) throw error;
-            const { data: urlData } = supabase.storage.from('driver_document').getPublicUrl(fileName);
-            return urlData.publicUrl;
-        };
-
-        const [avatarUrl] = await Promise.all([ uploadFile(regData.avatarFile, 'avatar') ]);
-
-        const { error } = await supabase.from('driver_details').insert([{
-            mobile_number: regData.mobile, full_name: regData.fullName, vehicle_type: regData.vehicleType,
-            vehicle_number: regData.vehicleNumber, bank_account_number: regData.bankAccount, ifsc_code: regData.ifscCode,
-            account_holder_name: regData.accountHolder || regData.fullName, avatar_url: avatarUrl,
-            preferred_zone: regData.preferredZone, blood_group: regData.bloodGroup, tshirt_size: regData.tshirtSize,
-            emergency_contact: regData.emergencyContact, is_approved: false, 
-            is_online: 'offline',   // 🔥 SECURE FIX: Now correctly inserts text "offline"
-            status: 'offline'       // 🔥 SECURE FIX: Both columns stay synced!
-        }]);
-
-        if (error) throw error;
-        alert("Registration Successful! Pending Admin Approval.");
-        setView('login'); 
-    } catch (error) {
-        alert("Registration failed: " + error.message);
-    } finally {
-        setLoading(false);
-    }
   };
 
   return (
@@ -122,7 +106,7 @@ function App() {
       {view === 'welcome' && <WelcomeView setView={setView} t={t} />}
       {view === 'login' && <LoginView regData={regData} setRegData={setRegData} handleLogin={handleLogin} loading={loading} t={t} />}
       {view === 'verification' && <VerificationView regData={regData} setRegData={setRegData} handleVerify={handleVerify} loading={loading} t={t} />}
-      {view === 'registration' && <RegistrationView regData={regData} setRegData={setRegData} handleRegister={handleRegister} loading={loading} />}
+      {view === 'registration' && <RegistrationView regData={regData} setRegData={setRegData} setView={setView} />}      
       {view === 'wallet' && <WalletView setView={setView} t={t} regData={regData} />}
       {view === 'dashboard' && <DashboardView t={t} regData={regData} setView={setView} />}      
     </div>

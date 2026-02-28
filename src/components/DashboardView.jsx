@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { supabase } from '../config'; // Added Supabase!
+import { supabase } from '../config'; 
 import HomeSection from './HomeSection';
 import OrdersSection from './OrdersSection';
 import EarningsSection from './EarningsSection';
@@ -7,7 +7,7 @@ import ProfileSection from './ProfileSection';
 
 export default function DashboardView({ t, regData, setView }) {
   const [activeTab, setActiveTab] = useState('home');
-  const [pendingCount, setPendingCount] = useState(0); // 🔥 NEW: Real-time badge state
+  const [pendingCount, setPendingCount] = useState(0); 
 
   // Auto-redirect to Orders if they refresh the app during a trip
   useEffect(() => {
@@ -17,11 +17,11 @@ export default function DashboardView({ t, regData, setView }) {
     }
   }, []);
 
-  // 🔥 NEW: Fetch real-time count of pending orders for the red badge!
+  // 🔥 UPDATED: Now points to 'driver_orders' instead of 'orders'
   useEffect(() => {
     const fetchCount = async () => {
         const { count } = await supabase
-            .from('orders')
+            .from('driver_orders')
             .select('*', { count: 'exact', head: true })
             .or('status.ilike.pending,status.is.null');
         setPendingCount(count || 0);
@@ -30,7 +30,7 @@ export default function DashboardView({ t, regData, setView }) {
     fetchCount();
 
     const sub = supabase.channel('badge_updates')
-        .on('postgres_changes', { event: '*', schema: 'public', table: 'orders' }, () => {
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'driver_orders' }, () => {
             fetchCount();
         }).subscribe();
 
@@ -61,7 +61,6 @@ export default function DashboardView({ t, regData, setView }) {
       <nav className="fixed bottom-0 left-0 right-0 pb-safe pt-2 px-6 bg-white/90 dark:bg-dark-surface/90 border-t border-slate-100 dark:border-dark-border glass z-50">
         <div className="flex justify-between items-center h-16 max-w-md mx-auto">
           <NavButton icon="home" label="Home" active={activeTab === 'home'} onClick={() => handleTabChange('home')} />
-          {/* 🔥 PASSING THE REAL BADGE COUNT HERE */}
           <NavButton icon="orders" label="Orders" active={activeTab === 'orders'} onClick={() => handleTabChange('orders')} badge={pendingCount} />
           <NavButton icon="earnings" label="Earnings" active={activeTab === 'earnings'} onClick={() => handleTabChange('earnings')} />
           <NavButton icon="profile" label="Profile" active={activeTab === 'profile'} onClick={() => handleTabChange('profile')} />

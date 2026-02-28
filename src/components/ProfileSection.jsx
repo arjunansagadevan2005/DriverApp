@@ -10,6 +10,7 @@ export default function ProfileSection({ t, setView, regData = {} }) {
     const [activeModal, setActiveModal] = useState(null);
     const [isVoiceOn, setIsVoiceOn] = useState(true);
     const [fetchError, setFetchError] = useState(""); 
+    const [driverUuid, setDriverUuid] = useState(null);
     
     // Performance Tab State
     const [perfPeriod, setPerfPeriod] = useState('daily');
@@ -24,7 +25,8 @@ export default function ProfileSection({ t, setView, regData = {} }) {
         todayOrders: 0, todayEarnings: 0, weeklyOrders: 0, walletBalance: 0,
         referrals: 0, referralCode: "PENDING", fullName: "Partner", driverId: "PENDING",
         bankAccount: "", ifscCode: "", vehicleType: "Not Set", vehicleNumber: "N/A",
-        avatarUrl: null // 🔥 FIXED: Added avatarUrl to properly fetch image!
+        weightLimit: "Standard", modelName: "",
+        avatarUrl: null, aadharUrl: null, panUrl: null, licenseUrl: null, rcUrl: null
     });
 
     useEffect(() => {
@@ -34,64 +36,120 @@ export default function ProfileSection({ t, setView, regData = {} }) {
                 return;
             }
 
-            let safeMobile = String(regData.mobile).replace(/\D/g, '');
-            if (safeMobile.length > 10) safeMobile = safeMobile.slice(-10); 
+            let safeMobile = String(regData.mobile).replace(/\D/g, '').slice(-10);
 
             try {
-                const { data, error } = await supabase.from('driver_details').select('*').eq('mobile_number', safeMobile).limit(1);
+                // 🔥 1. Fetch Core Profile FIRST
+                const { data: profile, error } = await supabase
+                    .from('driver_profiles')
+                    .select('*')
+                    .eq('mobile_number', safeMobile)
+                    .single();
 
-                if (error) setFetchError(error.message);
-                else if (data && data.length > 0) {
-                    const row = data[0]; 
+                if (error) throw error;
+
+                if (profile) {
                     setFetchError(""); 
+                    setDriverUuid(profile.id);
+
+                    // 🔥 2. Fetch other tables separately using the UUID
+                    const [
+                        { data: stats },
+                        { data: vehicle },
+                        { data: bank },
+                        { data: docsArray }
+                    ] = await Promise.all([
+                        supabase.from('driver_stats').select('*').eq('driver_id', profile.id).maybeSingle(),
+                        supabase.from('driver_vehicles').select('*').eq('driver_id', profile.id).maybeSingle(),
+                        supabase.from('driver_bank_accounts').select('*').eq('driver_id', profile.id).maybeSingle(),
+                        supabase.from('driver_documentss').select('document_type, file_url').eq('driver_id', profile.id)
+                    ]);
+
+                    let docs = { aadhar: null, pan: null, license: null, rc: null };
+                    if (docsArray) {
+                        docsArray.forEach(doc => { docs[doc.document_type] = doc.file_url; });
+                    }
+
+                    const safeStats = stats || {};
+                    const safeVehicle = vehicle || {};
+                    const safeBank = bank || {};
+
+                    // 🔥 Push data to UI based on your exact SQL table structure
                     setDbData({
-                        todayOrders: Number(row.total_orders_completed) || 0, 
-                        todayEarnings: Number(row.total_earnings) || 0,
-                        weeklyOrders: Number(row.weekly_orders_completed) || 0, 
-                        walletBalance: Number(row.wallet_balance) || 0,
-                        referrals: Number(row.referrals) || 0,
-                        referralCode: row.referral_code || "NONE",
-                        fullName: row.full_name || "Partner",
-                        driverId: row.driver_id || "PENDING",
-                        bankAccount: row.bank_account_number || "", 
-                        ifscCode: row.ifsc_code || "",
-                        vehicleType: row.vehicle_type || "Not Set",
-                        vehicleNumber: row.vehicle_number || "N/A",
-                        avatarUrl: row.avatar_url || null // 🔥 Database Avatar URL!
+                        fullName: profile.full_name || "Partner",
+                        driverId: profile.driver_id || "PENDING", // E.g., DRV2005ARJ
+                        avatarUrl: profile.avatar_url || null,
+                        referralCode: profile.referral_code || "NONE",
+                        
+                        todayOrders: Number(safeStats.total_orders_completed) || 0, 
+                        todayEarnings: Number(safeStats.total_earnings) || 0,
+                        weeklyOrders: Number(safeStats.weekly_orders_completed) || 0, 
+                        walletBalance: Number(safeStats.wallet_balance) || 0,
+                        referrals: Number(safeStats.total_referrals) || 0,
+                        
+                        vehicleType: safeVehicle.vehicle_type || "Not Set",
+                        vehicleNumber: safeVehicle.registration_number || "N/A",
+                        weightLimit: safeVehicle.weight_capacity || "Standard",
+                        modelName: safeVehicle.model_name || "",
+                        
+                        bankAccount: safeBank.account_number || "", 
+                        ifscCode: safeBank.ifsc_code || "",
+
+                        aadharUrl: docs.aadhar,
+                        panUrl: docs.pan,
+                        licenseUrl: docs.license,
+                        rcUrl: docs.rc
                     });
                 }
 
-                // Fetch Leaderboard
-                const { data: topDriversData } = await supabase
-                    .from('driver_details')
-                    .select('full_name, mobile_number, weekly_earnings, weekly_orders_completed') 
+                // 🔥 3. Safe Leaderboard Fetch (Bypasses inner join errors)
+                const { data: topStats } = await supabase
+                    .from('driver_stats')
+                    .select('*')
                     .order('weekly_earnings', { ascending: false, nullsFirst: false }) 
                     .limit(10); 
 
-                if (topDriversData) {
-                    setLeaderboard(topDriversData.map((d, index) => ({
-                        name: d.mobile_number === safeMobile ? (t && t('you') ? t('you') : 'You') : (d.full_name || 'Partner'),
-                        earnings: Number(d.weekly_earnings) || 0, 
-                        trips: Number(d.weekly_orders_completed) || 0, 
-                        rank: index + 1,
-                        isMe: d.mobile_number === safeMobile
-                    })));
+                if (topStats && topStats.length > 0) {
+                    const driverIds = topStats.map(s => s.driver_id);
+                    const { data: profiles } = await supabase
+                        .from('driver_profiles')
+                        .select('id, full_name, mobile_number')
+                        .in('id', driverIds);
+                    
+                    const profileMap = {};
+                    if (profiles) profiles.forEach(p => profileMap[p.id] = p);
+
+                    setLeaderboard(topStats.map((d, index) => {
+                        const prof = profileMap[d.driver_id] || {};
+                        return {
+                            name: prof.mobile_number === safeMobile ? (t && t('you') ? t('you') : 'You') : (prof.full_name || 'Partner'),
+                            earnings: Number(d.weekly_earnings) || 0, 
+                            trips: Number(d.weekly_orders_completed) || 0, 
+                            rank: index + 1,
+                            isMe: prof.mobile_number === safeMobile
+                        };
+                    }));
                 }
             } catch (err) {
-                setFetchError("Network error. Please check VPN.");
+                console.error("Fetch Profile Error: ", err);
+                setFetchError("Network error. Please check your connection.");
             }
         };
 
         fetchProfileData();
 
-        // REAL-TIME DB SYNC (Updates Profile automatically when order finishes)
-        let driverSub;
-        if (regData?.mobile) {
-            let safeMobile = String(regData.mobile).replace(/\D/g, '');
-            if (safeMobile.length > 10) safeMobile = safeMobile.slice(-10);
+    }, [regData?.mobile, t]);
 
+    useEffect(() => {
+        let driverSub;
+        if (driverUuid) {
             driverSub = supabase.channel('profile_updates')
-                .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'driver_details', filter: `mobile_number=eq.${safeMobile}` }, (payload) => {
+                .on('postgres_changes', { 
+                    event: 'UPDATE', 
+                    schema: 'public', 
+                    table: 'driver_stats', 
+                    filter: `driver_id=eq.${driverUuid}` 
+                }, (payload) => {
                     const row = payload.new;
                     setDbData(prev => ({
                         ...prev,
@@ -103,8 +161,7 @@ export default function ProfileSection({ t, setView, regData = {} }) {
                 }).subscribe();
         }
         return () => { if (driverSub) supabase.removeChannel(driverSub); };
-
-    }, [regData?.mobile, t]);
+    }, [driverUuid]);
 
     const ranks = [
         { id: 1, name: 'Trainee', threshold: 0, icon: 'user', colorBg: 'bg-slate-100 dark:bg-slate-800', colorText: 'text-slate-600 dark:text-slate-400' },
@@ -304,26 +361,30 @@ export default function ProfileSection({ t, setView, regData = {} }) {
             );
         }
         else if (activeModal === 'docs') {
-             const renderDoc = (name, file) => `
+             const renderDoc = (name, dbUrl) => `
                 <div class="flex items-center justify-between p-3 bg-white dark:bg-slate-800 rounded-lg border border-slate-100 dark:border-slate-700">
                     <div class="flex items-center gap-3">
-                        <div class="${file ? 'text-green-500' : 'text-slate-300'}">${getIcon('check', 18)}</div>
+                        <div class="${dbUrl ? 'text-green-500' : 'text-slate-300'}">${getIcon('check', 18)}</div>
                         <div>
                             <p class="font-bold text-sm dark:text-white">${name}</p>
-                            <p class="text-xs text-slate-400">${file ? 'Uploaded' : 'Pending Upload'}</p>
+                            <p class="text-xs text-slate-400">${dbUrl ? 'Uploaded & Active' : 'Pending Upload'}</p>
                         </div>
                     </div>
-                    <span class="px-2 py-1 ${file ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400' : 'bg-slate-100 text-slate-500'} text-[10px] font-bold rounded uppercase">${file ? 'Active' : 'Missing'}</span>
+                    ${dbUrl ? 
+                        `<a href="${dbUrl}" target="_blank" class="px-3 py-1 bg-brand-50 text-brand-600 dark:bg-brand-900/30 dark:text-brand-400 text-[10px] font-bold rounded uppercase hover:bg-brand-100 transition-colors">View</a>` 
+                        : 
+                        `<span class="px-2 py-1 bg-slate-100 text-slate-500 text-[10px] font-bold rounded uppercase">Missing</span>`
+                    }
                 </div>
             `;
             content = (
                 <div>
                     <h2 className="text-xl font-bold mb-4 dark:text-white">Documents</h2>
                     <div className="space-y-3" dangerouslySetInnerHTML={{ __html: 
-                        renderDoc('Driving License', regData.licenseFile) +
-                        renderDoc('RC Book', regData.rcFile) +
-                        renderDoc('Insurance', regData.insuranceFile) +
-                        renderDoc('Aadhaar Card', regData.aadhaarFile)
+                        renderDoc('Driving License', dbData.licenseUrl) +
+                        renderDoc('RC Book', dbData.rcUrl) +
+                        renderDoc('PAN Card', dbData.panUrl) +
+                        renderDoc('Aadhaar Card', dbData.aadharUrl)
                     }}></div>
                 </div>
             );
@@ -409,7 +470,9 @@ export default function ProfileSection({ t, setView, regData = {} }) {
                                 <div className="w-12 h-12 rounded-full bg-brand-600 flex items-center justify-center text-white" dangerouslySetInnerHTML={{ __html: getIcon('truck', 24) }} />
                                 <div>
                                     <p className="text-xs text-brand-700 dark:text-brand-400 font-semibold uppercase">Vehicle Type</p>
-                                    <p className="text-lg font-black text-brand-900 dark:text-brand-300 capitalize">{dbData.vehicleType}</p>
+                                    <p className="text-lg font-black text-brand-900 dark:text-brand-300 capitalize">
+                                        {dbData.modelName || dbData.vehicleType}
+                                    </p>
                                 </div>
                             </div>
                         </div>
@@ -421,7 +484,7 @@ export default function ProfileSection({ t, setView, regData = {} }) {
                             </div>
                             <div className="bg-white dark:bg-slate-800 rounded-xl p-4 border border-slate-200 dark:border-slate-700">
                                 <p className="text-xs text-slate-500 dark:text-slate-400 mb-1 font-semibold">Weight Limit</p>
-                                <p className="text-base font-black text-slate-900 dark:text-white">Standard</p>
+                                <p className="text-base font-black text-slate-900 dark:text-white">{dbData.weightLimit}</p>
                             </div>
                         </div>
                         
@@ -542,7 +605,6 @@ export default function ProfileSection({ t, setView, regData = {} }) {
             <div className="flex items-center gap-4 mb-6 mt-2">
                 <div className="relative group">
                     <div className="w-20 h-20 rounded-full bg-slate-200 dark:bg-slate-700 flex items-center justify-center overflow-hidden border-2 border-white dark:border-slate-600 shadow-md">
-                        {/* 🔥 FIXED: Now fetches the DB avatarUrl instead of a ghost file */}
                         {dbData.avatarUrl 
                             ? <img src={dbData.avatarUrl} className="w-full h-full object-cover" alt="Profile" /> 
                             : <span dangerouslySetInnerHTML={{ __html: getIcon('user', 40, 'text-slate-400') }} />

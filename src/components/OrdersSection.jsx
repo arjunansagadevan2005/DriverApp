@@ -13,8 +13,8 @@ const getIcon = (name, size = 24, classes = '') => {
 // NAVIGATION CONFIRMATION MODAL
 // ═══════════════════════════════════════════════════════════════════════════
 function NavigationModal({ order, onClose, onGoToLocation }) {
-    const pickupAddress = order.vendor_shop_name || order.pickup_address || 'Pickup Location';
-    const dropAddress = order.delivery_address || order.client_address || order.customer_address || 'Drop Location';
+    const pickupAddress = order?.vendor_shop_name || order?.pickup_address || 'Pickup Location';
+    const dropAddress = order?.delivery_address || order?.client_address || order?.customer_address || 'Drop Location';
 
     return (
         <div className="fixed inset-0 z-[80] flex items-center justify-center">
@@ -78,16 +78,13 @@ export default function OrdersSection({ t, regData }) {
   const [tab, setTab] = useState('new');
   const [historyFilter, setHistoryFilter] = useState('Completed'); 
   
-  // Active Trip State
   const [activeTrip, setActiveTrip] = useState(() => {
-      const savedTrip = localStorage.getItem('activeTrip');
-      if (savedTrip) {
-          return JSON.parse(savedTrip); 
-      }
-      return null;
+      try {
+          const savedTrip = localStorage.getItem('activeTrip');
+          return savedTrip ? JSON.parse(savedTrip) : null;
+      } catch(e) { return null; }
   });
   
-  // Cancellation States
   const [isCancelModalOpen, setIsCancelModalOpen] = useState(false);
   const [cancelReason, setCancelReason] = useState("");
   const cancelReasonsList = [
@@ -108,92 +105,118 @@ export default function OrdersSection({ t, regData }) {
   const [isLoading, setIsLoading] = useState(false);
   const [isChatOpen, setIsChatOpen] = useState(false);
   
-  const [dbVehicle, setDbVehicle] = useState("");
+  const [driverUuid, setDriverUuid] = useState(null);
+  const [driverVehicleDetails, setDriverVehicleDetails] = useState(null); 
   
   const mapRef = useRef(null);
   const mapContainerRef = useRef(null);
 
+  // 1. SAFE DATA INITIALIZATION
   useEffect(() => {
-      const fetchVehicle = async () => {
-          if (!regData?.mobile) return;
-          const { data } = await supabase
-              .from('driver_details')
-              .select('vehicle_type')
-              .eq('mobile_number', regData.mobile)
-              .single();
-          if (data) setDbVehicle(data.vehicle_type || "");
+      const fetchDriverData = async () => {
+          try {
+              if (!regData?.mobile) return;
+              let safeMobile = String(regData.mobile).replace(/\D/g, '').slice(-10);
+
+              const { data: profile } = await supabase.from('driver_profiles').select('id').eq('mobile_number', safeMobile).maybeSingle();
+
+              if (profile) {
+                  setDriverUuid(profile.id);
+                  const { data: vehicle } = await supabase.from('driver_vehicles').select('*').eq('driver_id', profile.id).maybeSingle();
+                  setDriverVehicleDetails(vehicle || {});
+              }
+          } catch(e) { console.error("Profile fetch error in orders section", e); }
       };
-      fetchVehicle();
+      fetchDriverData();
   }, [regData?.mobile]);
 
-  // 🔥 UPDATED FETCH LOGIC: Merges Database History with Local Memory Vault!
+  // 2. THE EXACT MATCH 6-RULE ENGINE (Handles numbers perfectly)
+  const checkOrderMatch = (order, vehicle) => {
+      if (!vehicle || !order) return false;
+
+      // Safe extraction turns "1000", "1200 kg", "1.5 tons" into pure numbers
+      const extractNum = (str) => {
+          if (!str || String(str).toLowerCase() === 'null' || String(str).toLowerCase() === 'any') return 0;
+          const match = String(str).match(/\d+(\.\d+)?/);
+          return match ? parseFloat(match[0]) : 0;
+      };
+
+      const reqType = (order.vehicle_type_requested || order.vehicle_type || "").toLowerCase().trim();
+      const myType = (vehicle.vehicle_type || "").toLowerCase().trim();
+      if (reqType && reqType !== 'any' && reqType !== 'null' && reqType !== myType) return false;
+
+      const reqWeight = extractNum(order.weight_capacity_requested);
+      const myWeight = extractNum(vehicle.weight_capacity);
+      if (reqWeight > 0 && myWeight < reqWeight) return false; 
+
+      const reqBody = (order.body_type_requested || "").toLowerCase().trim();
+      const myBody = (vehicle.body_type || "").toLowerCase().trim();
+      if (reqBody && reqBody !== 'any' && reqBody !== 'null' && reqBody !== myBody) return false;
+
+      const reqDim = extractNum(order.dimensions_requested);
+      const myDim = extractNum(vehicle.dimensions);
+      if (reqDim > 0 && myDim < reqDim) return false;
+
+      const reqModelId = (order.model_id_requested || "").toLowerCase().trim();
+      const myModelId = (vehicle.model_id || "").toLowerCase().trim();
+      if (reqModelId && reqModelId !== 'any' && reqModelId !== 'null' && reqModelId !== myModelId) return false;
+
+      const reqModelName = (order.model_name_requested || "").toLowerCase().trim();
+      const myModelName = (vehicle.model_name || "").toLowerCase().trim();
+      if (reqModelName && reqModelName !== 'any' && reqModelName !== 'null' && reqModelName !== myModelName) return false;
+
+      return true; 
+  };
+
+  // 3. FETCH & FILTER ORDERS
   useEffect(() => {
     const fetchOrders = async () => {
       setIsLoading(true);
       
       if (tab === 'new') {
-        const { data, error } = await supabase
-          .from('orders')
+        const { data } = await supabase.from('driver_orders')
           .select('*')
-          .or('status.ilike.pending,status.is.null')
+          .or('status.ilike.pending,status.is.null') // Core requirement
           .order('created_at', { ascending: false });
 
-        if (data && !error) {
-           const myVehicle = (dbVehicle || regData?.vehicleType || "").toLowerCase().trim();
-           const filtered = data.filter(o => {
-               const oVehicle = (o.vehicle_type || "").toLowerCase().trim();
-               return !oVehicle || oVehicle === 'any' || oVehicle === 'all' || oVehicle === myVehicle;
-           });
+        if (data && driverVehicleDetails) {
+           const filtered = data.filter(o => checkOrderMatch(o, driverVehicleDetails));
            setOrders(filtered);
         }
       } 
       else {
-        if (regData?.mobile) {
-            // 1. Fetch official completed orders from Supabase
-            const { data, error } = await supabase
-                .from('orders')
-                .select('*')
-                .eq('driver_number', regData.mobile)
-                .in('status', ['Completed']) 
-                .order('created_at', { ascending: false });
+        if (driverUuid) {
+            const { data } = await supabase.from('driver_orders')
+                .select('*').eq('driver_id', driverUuid).in('status', ['Completed']).order('created_at', { ascending: false });
 
-            // 2. Fetch Cancelled/Missed orders from Local Vault
-            const localVault = JSON.parse(localStorage.getItem(`local_history_${regData.mobile}`) || "[]");
-            
-            // 3. Merge them together safely
+            const localVault = JSON.parse(localStorage.getItem(`local_history_${regData?.mobile}`) || "[]");
             let combinedHistory = data ? [...data] : [];
             const existingIds = new Set(combinedHistory.map(item => item.id));
             
             localVault.forEach(item => {
-                if (!existingIds.has(item.id)) {
-                    combinedHistory.push(item);
-                }
+                if (!existingIds.has(item.id)) combinedHistory.push(item);
             });
 
-            // 4. Sort by newest first
             combinedHistory.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
-
             setHistory(combinedHistory);
         }
       }
       setIsLoading(false);
     };
 
-    fetchOrders();
+    if (driverVehicleDetails) fetchOrders();
 
-    const orderSub = supabase
-      .channel('public:orders')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'orders' }, () => {
-        fetchOrders(); 
-      })
-      .subscribe();
+    const orderSub = supabase.channel('public:driver_orders')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'driver_orders' }, () => {
+        if (driverVehicleDetails) fetchOrders(); 
+      }).subscribe();
 
     return () => supabase.removeChannel(orderSub);
-  }, [tab, regData?.mobile, dbVehicle, historyFilter]);
+  }, [tab, driverUuid, driverVehicleDetails, historyFilter, regData?.mobile]);
 
-  // --- LEAFLET MAP LOGIC ---
+  // 4. MAP RENDERING & GPS ROUTING
   useEffect(() => {
-    if (!activeTrip || !mapContainerRef.current) return;
+    if (!activeTrip || !mapContainerRef.current || !driverLocation) return;
 
     if (mapRef.current) {
         mapRef.current.remove();
@@ -214,6 +237,7 @@ export default function OrdersSection({ t, regData }) {
     L.marker(driverLocation, {icon: driverIcon, zIndexOffset: 1000}).addTo(map);
     
     const extractCoords = (order, type) => {
+        if (!order) return [13.0827, 80.2707];
         if (type === 'pickup') {
             if (order.pickup_coords) return order.pickup_coords;
             if (order.pickup_latitude && order.pickup_longitude) return [parseFloat(order.pickup_latitude), parseFloat(order.pickup_longitude)];
@@ -232,13 +256,9 @@ export default function OrdersSection({ t, regData }) {
     const fetchRoute = async (startCoords, endCoords, color, dashArray) => {
         try {
             let routingProfile = 'driving-car'; 
-            const vType = (regData?.vehicleType || dbVehicle || "").toLowerCase();
-            
-            if (vType === 'truck' || vType === 'tempo') {
-                routingProfile = 'driving-hgv'; 
-            } else if (vType === '2wheeler') {
-                routingProfile = 'cycling-electric'; 
-            }
+            const vType = (driverVehicleDetails?.vehicle_type || "").toLowerCase();
+            if (vType === 'truck' || vType === 'tempo') routingProfile = 'driving-hgv'; 
+            else if (vType === '2wheeler') routingProfile = 'cycling-electric'; 
 
             const response = await fetch(`https://api.openrouteservice.org/v2/directions/${routingProfile}`, {
                 method: "POST",
@@ -273,34 +293,25 @@ export default function OrdersSection({ t, regData }) {
         map.fitBounds([driverLocation, dropCoords], {padding: [50, 50]});
     }
 
-    return () => { 
-        if (mapRef.current) { mapRef.current.remove(); mapRef.current = null; } 
-    };
-  }, [activeTrip, driverLocation]);
+    return () => { if (mapRef.current) { mapRef.current.remove(); mapRef.current = null; } };
+  }, [activeTrip, driverLocation, driverVehicleDetails]);
 
+  // 5. ACTION HANDLERS
   const handleAccept = async (order) => {
+      if (!driverUuid || !order) return;
       setOrders(prev => prev.filter(o => o.id !== order.id));
-      await supabase.from('orders')
-        .update({ status: 'Accepted', driver_name: regData.fullName || 'Partner', driver_number: regData.mobile })
-        .eq('id', order.id);
-      
+      await supabase.from('driver_orders').update({ status: 'Accepted', driver_id: driverUuid }).eq('id', order.id);
       localStorage.setItem('activeTrip', JSON.stringify({ ...order, step: 0 }));
       setNavigatingOrder(order);
   };
 
-  // 🔥 NEW: Save "Ignored" orders as "Missed" in the Local Vault!
   const handleIgnore = (order) => {
+      if (!order) return;
       setOrders(prev => prev.filter(o => o.id !== order.id));
-      
-      const missedRecord = {
-          ...order,
-          status: 'Missed',
-          created_at: new Date().toISOString()
-      };
-      
-      const localVault = JSON.parse(localStorage.getItem(`local_history_${regData.mobile}`) || "[]");
+      const missedRecord = { ...order, status: 'Missed', created_at: new Date().toISOString() };
+      const localVault = JSON.parse(localStorage.getItem(`local_history_${regData?.mobile}`) || "[]");
       localVault.push(missedRecord);
-      localStorage.setItem(`local_history_${regData.mobile}`, JSON.stringify(localVault));
+      localStorage.setItem(`local_history_${regData?.mobile}`, JSON.stringify(localVault));
   };
 
   const handleGoToLocation = () => {
@@ -312,59 +323,37 @@ export default function OrdersSection({ t, regData }) {
   const handleStartVoiceNavigation = () => {
       const extractCoords = (order, type) => {
           if (type === 'pickup') {
-              if (order.pickup_coords) return order.pickup_coords;
               if (order.pickup_latitude && order.pickup_longitude) return [parseFloat(order.pickup_latitude), parseFloat(order.pickup_longitude)];
               return [13.0827, 80.2707];
           } else {
-              if (order.drop_coords) return order.drop_coords;
               if (order.delivery_latitude && order.delivery_longitude) return [parseFloat(order.delivery_latitude), parseFloat(order.delivery_longitude)];
-              if (order.client_latitude && order.client_longitude) return [parseFloat(order.client_latitude), parseFloat(order.client_longitude)];
               return [13.1000, 80.2600];
           }
       };
-
-      const targetCoords = activeTrip.step === 0 
-          ? extractCoords(activeTrip, 'pickup') 
-          : extractCoords(activeTrip, 'drop');
-      
-      const vType = (regData?.vehicleType || dbVehicle || "").toLowerCase();
-      let travelMode = 'driving'; 
-      if (vType === '2wheeler') {
-          travelMode = 'two-wheeler'; 
-      }
-
-      const gmapsUrl = `https://www.google.com/maps/dir/?api=1&destination=${targetCoords[0]},${targetCoords[1]}&travelmode=${travelMode}`;
-      window.open(gmapsUrl, '_blank');
+      const targetCoords = activeTrip.step === 0 ? extractCoords(activeTrip, 'pickup') : extractCoords(activeTrip, 'drop');
+      const travelMode = (driverVehicleDetails?.vehicle_type || "").toLowerCase() === '2wheeler' ? 'two-wheeler' : 'driving';
+      window.open(`https://www.google.com/maps/dir/?api=1&destination=${targetCoords[0]},${targetCoords[1]}&travelmode=${travelMode}`, '_blank');
   };
 
   const handleAdvanceTrip = async () => {
       if (activeTrip.step === 0) {
+          let pLat = parseFloat(activeTrip.pickup_latitude) || 13.0827;
+          let pLng = parseFloat(activeTrip.pickup_longitude) || 80.2707;
           
-          let pLat = 13.0827, pLng = 80.2707;
-          if (activeTrip.pickup_latitude && activeTrip.pickup_longitude) {
-              pLat = parseFloat(activeTrip.pickup_latitude);
-              pLng = parseFloat(activeTrip.pickup_longitude);
-          } else if (activeTrip.pickup_coords) {
-              pLat = activeTrip.pickup_coords[0];
-              pLng = activeTrip.pickup_coords[1];
+          if (driverLocation) {
+              const distanceInMeters = L.latLng(driverLocation).distanceTo(L.latLng([pLat, pLng]));
+              if (distanceInMeters > 200) {
+                  alert(`You are still ${Math.round(distanceInMeters)} meters away. Please reach the pickup location before marking as arrived.`);
+                  return; 
+              }
           }
-
-          const distanceInMeters = L.latLng(driverLocation).distanceTo(L.latLng([pLat, pLng]));
-
-          if (distanceInMeters > 200) {
-              alert(`You are still ${Math.round(distanceInMeters)} meters away. Please reach the pickup location before marking as arrived.`);
-              return; 
-          }
-
           const updatedTrip = { ...activeTrip, step: 1 };
           setActiveTrip(updatedTrip); 
           localStorage.setItem('activeTrip', JSON.stringify(updatedTrip)); 
-          
       } else if (activeTrip.step === 1) {
           const generatedOtp = Math.floor(1000 + Math.random() * 9000).toString();
-          await supabase.from('orders').update({ delivery_otp: generatedOtp }).eq('id', activeTrip.id);
+          await supabase.from('driver_orders').update({ delivery_otp: generatedOtp }).eq('id', activeTrip.id);
           alert(`[SIMULATED SMS TO CUSTOMER] Your delivery OTP is: ${generatedOtp}`);
-          
           const updatedTrip = { ...activeTrip, step: 2, correctOtp: generatedOtp };
           setActiveTrip(updatedTrip);
           localStorage.setItem('activeTrip', JSON.stringify(updatedTrip)); 
@@ -373,7 +362,7 @@ export default function OrdersSection({ t, regData }) {
 
   const handleVerifyOtp = async () => {
       if (otpInput === activeTrip.correctOtp) {
-          await supabase.from('orders').update({ status: 'Completed' }).eq('id', activeTrip.id);
+          await supabase.from('driver_orders').update({ status: 'Completed' }).eq('id', activeTrip.id);
           setActiveTrip(null);
           localStorage.removeItem('activeTrip'); 
           setOtpInput(''); 
@@ -386,46 +375,26 @@ export default function OrdersSection({ t, regData }) {
       }
   };
 
-  // 🔥 UPDATED: Saving Cancelled orders into the Local Vault!
   const confirmCancelTrip = async () => {
       if (!cancelReason) {
           alert("Please select a reason before cancelling.");
           return;
       }
-
       try {
-          // 1. Reset the order so another driver can pick it up
-          await supabase.from('orders').update({ 
-              status: 'pending',        
-              driver_name: null,        
-              driver_number: null       
-          }).eq('id', activeTrip.id);
-          
-          // 2. 🔥 SAVE A RECEIPT TO THE LOCAL VAULT FOR HISTORY 🔥
-          const cancelRecord = {
-              ...activeTrip,
-              status: 'Cancelled', // Force status to Cancelled for UI
-              cancel_reason: cancelReason,
-              created_at: new Date().toISOString() // timestamp of cancellation
-          };
-          const localVault = JSON.parse(localStorage.getItem(`local_history_${regData.mobile}`) || "[]");
+          await supabase.from('driver_orders').update({ status: 'pending', driver_id: null }).eq('id', activeTrip.id);
+          const cancelRecord = { ...activeTrip, status: 'Cancelled', cancel_reason: cancelReason, created_at: new Date().toISOString() };
+          const localVault = JSON.parse(localStorage.getItem(`local_history_${regData?.mobile}`) || "[]");
           localVault.push(cancelRecord);
-          localStorage.setItem(`local_history_${regData.mobile}`, JSON.stringify(localVault));
+          localStorage.setItem(`local_history_${regData?.mobile}`, JSON.stringify(localVault));
 
-          // 3. Clear active trip & unlock app
           setActiveTrip(null);
           localStorage.removeItem('activeTrip'); 
           setIsCancelModalOpen(false);
           setCancelReason("");
-          
           alert("Order cancelled. It has been returned to the available pool.");
-          
-          // Force jump to history tab so they see it worked!
           setTab('history'); 
           setHistoryFilter('Cancelled'); 
-      } catch (err) {
-          console.error("Error cancelling order:", err);
-      }
+      } catch (err) {}
   };
 
   if (activeTrip) {
@@ -557,18 +526,10 @@ export default function OrdersSection({ t, regData }) {
                           </div>
 
                           <div className="space-y-3">
-                              <button 
-                                onClick={confirmCancelTrip} 
-                                disabled={!cancelReason} 
-                                className="w-full py-4 rounded-xl font-black text-lg transition-all active:scale-95 disabled:opacity-50 disabled:active:scale-100 bg-red-600 text-white shadow-lg shadow-red-500/30 hover:bg-red-700"
-                              >
+                              <button onClick={confirmCancelTrip} disabled={!cancelReason} className="w-full py-4 rounded-xl font-black text-lg transition-all active:scale-95 disabled:opacity-50 disabled:active:scale-100 bg-red-600 text-white shadow-lg shadow-red-500/30 hover:bg-red-700">
                                 {cancelReason ? 'Confirm Cancel' : 'Select a reason first'}
                               </button>
-                              
-                              <button 
-                                onClick={() => setIsCancelModalOpen(false)} 
-                                className="w-full py-3 rounded-xl font-bold bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 active:scale-95 transition-transform"
-                              >
+                              <button onClick={() => setIsCancelModalOpen(false)} className="w-full py-3 rounded-xl font-bold bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 active:scale-95 transition-transform">
                                 Go Back
                               </button>
                           </div>
@@ -584,10 +545,13 @@ export default function OrdersSection({ t, regData }) {
         <div className="flex justify-between items-start mb-4 relative z-10">
           <div>
             <span className="text-[10px] font-black text-brand-600 bg-brand-50 dark:bg-brand-900/20 px-2 py-1 rounded uppercase tracking-widest">
-                {order.vehicle_type || 'Order'} #{order.id.toString().slice(0,6)}
+                {order.vehicle_type_requested || order.vehicle_type || 'Order'} #{String(order.id).slice(0,6)}
             </span>
             <h3 className="font-bold dark:text-white text-lg mt-2">{order.product_name || order.type || 'Delivery Request'}</h3>
-            <p className="text-xs text-slate-500">{order.quantity ? `${order.quantity} Units` : 'Standard Delivery'}</p>
+            <p className="text-xs text-slate-500">
+              {order.quantity ? `${order.quantity} • ` : ''}
+              {order.weight_capacity_requested ? `${order.weight_capacity_requested}` : 'Standard Load'}
+            </p>
           </div>
           <div className="text-right">
             <p className="text-2xl font-black text-brand-600">₹{order.total_amount || order.delivery_fee || '0'}</p>
@@ -601,14 +565,12 @@ export default function OrdersSection({ t, regData }) {
         </div>
 
         <div className="grid grid-cols-2 gap-3 relative z-10">
-            {/* 🔥 FIX: Clicking Ignore now saves to the 'Missed' History vault! */}
             <button onClick={() => handleIgnore(order)} className="py-3 font-bold text-slate-500 bg-slate-50 dark:bg-slate-800 rounded-xl hover:bg-slate-100 transition-colors">Ignore</button>
             <button onClick={() => handleAccept(order)} className="py-3 font-bold text-white bg-brand-600 rounded-xl shadow-lg shadow-brand-500/30 active:scale-95 transition-transform">Accept</button>
         </div>
       </div>
   );
 
-  // Helper to style history status badges
   const getStatusStyle = (status) => {
       const s = (status || "").toLowerCase();
       if (s === 'completed') return 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400';
@@ -617,7 +579,6 @@ export default function OrdersSection({ t, regData }) {
       return 'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300';
   };
 
-  // Filter history logic based on the sub-tab selected
   const filteredHistory = history.filter(order => {
       if (historyFilter === 'Completed') return order.status === 'Completed';
       if (historyFilter === 'Cancelled') return order.status === 'Cancelled';
@@ -668,7 +629,6 @@ export default function OrdersSection({ t, regData }) {
             )
         ) : (
             <div>
-                {/* SUB-TABS FOR HISTORY FILTERING */}
                 <div className="flex gap-2 overflow-x-auto no-scrollbar mb-5 pb-1">
                     {['Completed', 'Cancelled', 'Missed'].map(filter => (
                         <button 
@@ -685,13 +645,12 @@ export default function OrdersSection({ t, regData }) {
                     ))}
                 </div>
 
-                {/* RENDER FILTERED LIST */}
                 {filteredHistory.length > 0 ? filteredHistory.map((order, idx) => (
                     <div key={`${order.id}-${idx}`} className="bg-white dark:bg-dark-surface p-5 rounded-3xl border border-slate-100 dark:border-slate-700 shadow-sm mb-4 transition-all hover:shadow-md">
                         <div className="flex justify-between items-start mb-2">
                             <div>
                                 <h3 className="font-bold dark:text-white text-lg line-clamp-1">{order.product_name || order.type || 'Delivery'}</h3>
-                                <p className="text-xs text-slate-500">#{order.id.toString().slice(0,6)}</p>
+                                <p className="text-xs text-slate-500">#{String(order.id).slice(0,6)}</p>
                             </div>
                             <div className="text-right">
                                 <p className="text-2xl font-black text-brand-600">₹{order.total_amount || order.delivery_fee || '0'}</p>
