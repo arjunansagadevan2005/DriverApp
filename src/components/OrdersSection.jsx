@@ -130,41 +130,67 @@ export default function OrdersSection({ t, regData }) {
       fetchDriverData();
   }, [regData?.mobile]);
 
-  // 2. THE EXACT MATCH 6-RULE ENGINE (Handles numbers perfectly)
+  // 2. THE EXACT MATCH 6-RULE ENGINE WITH X-RAY LOGS
   const checkOrderMatch = (order, vehicle) => {
       if (!vehicle || !order) return false;
 
-      // Safe extraction turns "1000", "1200 kg", "1.5 tons" into pure numbers
       const extractNum = (str) => {
           if (!str || String(str).toLowerCase() === 'null' || String(str).toLowerCase() === 'any') return 0;
           const match = String(str).match(/\d+(\.\d+)?/);
           return match ? parseFloat(match[0]) : 0;
       };
 
+      console.log(`\n🔍 --- CHECKING ORDER #${String(order.id).slice(0,6)} ---`);
+
+      // Rule 1: Vehicle Category Match
       const reqType = (order.vehicle_type_requested || order.vehicle_type || "").toLowerCase().trim();
       const myType = (vehicle.vehicle_type || "").toLowerCase().trim();
-      if (reqType && reqType !== 'any' && reqType !== 'null' && reqType !== myType) return false;
+      if (reqType && reqType !== 'any' && reqType !== 'null' && reqType !== myType) {
+          console.log(`❌ BLOCK: Order wants ${reqType}, you have ${myType}`);
+          return false;
+      }
 
+      // Rule 2: Weight Capacity Match
       const reqWeight = extractNum(order.weight_capacity_requested);
       const myWeight = extractNum(vehicle.weight_capacity);
-      if (reqWeight > 0 && myWeight < reqWeight) return false; 
+      if (reqWeight > 0 && myWeight < reqWeight) {
+          console.log(`❌ BLOCK: Order is ${reqWeight}kg. Your limit is ${myWeight}kg.`);
+          return false; 
+      }
 
+      // Rule 3: Body Type Match
       const reqBody = (order.body_type_requested || "").toLowerCase().trim();
       const myBody = (vehicle.body_type || "").toLowerCase().trim();
-      if (reqBody && reqBody !== 'any' && reqBody !== 'null' && reqBody !== myBody) return false;
+      if (reqBody && reqBody !== 'any' && reqBody !== 'null' && reqBody !== myBody) {
+          console.log(`❌ BLOCK: Order wants ${reqBody} body, you have ${myBody}`);
+          return false;
+      }
 
+      // Rule 4: Dimensions Match
       const reqDim = extractNum(order.dimensions_requested);
       const myDim = extractNum(vehicle.dimensions);
-      if (reqDim > 0 && myDim < reqDim) return false;
+      if (reqDim > 0 && myDim < reqDim) {
+          console.log(`❌ BLOCK: Order is ${reqDim}ft. Your limit is ${myDim}ft.`);
+          return false;
+      }
 
+      // Rule 5: Model ID Match
       const reqModelId = (order.model_id_requested || "").toLowerCase().trim();
       const myModelId = (vehicle.model_id || "").toLowerCase().trim();
-      if (reqModelId && reqModelId !== 'any' && reqModelId !== 'null' && reqModelId !== myModelId) return false;
+      if (reqModelId && reqModelId !== 'any' && reqModelId !== 'null' && reqModelId !== myModelId) {
+          console.log(`❌ BLOCK: Order wants model ${reqModelId}, you have ${myModelId}`);
+          return false;
+      }
 
+      // Rule 6: Model Name Match
       const reqModelName = (order.model_name_requested || "").toLowerCase().trim();
       const myModelName = (vehicle.model_name || "").toLowerCase().trim();
-      if (reqModelName && reqModelName !== 'any' && reqModelName !== 'null' && reqModelName !== myModelName) return false;
+      if (reqModelName && reqModelName !== 'any' && reqModelName !== 'null' && reqModelName !== myModelName) {
+          console.log(`❌ BLOCK: Order wants model name ${reqModelName}, you have ${myModelName}`);
+          return false;
+      }
 
+      console.log("✅ PERFECT MATCH: Showing order on screen!");
       return true; 
   };
 
@@ -174,12 +200,14 @@ export default function OrdersSection({ t, regData }) {
       setIsLoading(true);
       
       if (tab === 'new') {
+        // 🔥 FIX: We use exact .eq matching for 'pending' AND 'null' to be 100% sure
         const { data } = await supabase.from('driver_orders')
           .select('*')
-          .or('status.ilike.pending,status.is.null') // Core requirement
+          .or('status.eq.pending,status.is.null') 
           .order('created_at', { ascending: false });
 
         if (data && driverVehicleDetails) {
+           console.log("📥 Found Pending Orders in DB:", data.length);
            const filtered = data.filter(o => checkOrderMatch(o, driverVehicleDetails));
            setOrders(filtered);
         }

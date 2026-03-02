@@ -269,6 +269,7 @@ export default function HomeSection({ t, regData, setActiveTab }) {
     });
   };
 
+  // 🔥 THE 400-ERROR FIX (ONLY update the boolean to completely avoid Enum errors)
   const toggleOnline = async () => {
     const nextState = !isOnline; 
     
@@ -278,27 +279,21 @@ export default function HomeSection({ t, regData, setActiveTab }) {
     }
     
     setIsOnline(nextState); 
-    localStorage.setItem("isOnline", nextState ? "true" : "false");
+    localStorage.setItem("isOnline", String(nextState));
     
     if (regData?.mobile) {
-        let safeMobile = String(regData.mobile).replace(/\D/g, '').slice(-10);
-        
-        // 🔥 THE FIX: Convert the boolean (true/false) to a string ('true'/'false')
-        // so it matches your exact database column type!
-        const payload = { 
-            is_online: nextState ? 'true' : 'false',                    
-            status: nextState ? 'active' : 'offline' 
-        };
+        let mob = String(regData.mobile).replace(/\D/g, '').slice(-10);
 
         try {
-            const { error } = await supabase
-                .from('driver_profiles')
-                .update(payload)
-                .eq('mobile_number', safeMobile);
+            const { error } = await supabase.from('driver_profiles')
+                .update({ is_online: nextState }) // Sent as raw boolean
+                .eq('mobile_number', mob);
 
             if (error) {
-                console.error("Failed to update status in DB:", error.message);
-                alert("Could not update online status in database.");
+                // Fallback for strict text column
+                await supabase.from('driver_profiles')
+                    .update({ is_online: nextState ? 'true' : 'false' }) // Sent as text
+                    .eq('mobile_number', mob);
             }
         } catch (err) {
             console.error("Network error updating status:", err);
@@ -306,7 +301,7 @@ export default function HomeSection({ t, regData, setActiveTab }) {
     }
   };
 
-  // 🔥 THE X-RAY LOGICAL MATCHING ENGINE (Extremely Safe)
+  // THE X-RAY LOGICAL MATCHING ENGINE
   const checkOrderMatch = (order, vehicle) => {
       if (!vehicle || !order) return false;
 
@@ -318,7 +313,6 @@ export default function HomeSection({ t, regData, setActiveTab }) {
 
       console.log(`\n🔍 --- CHECKING NEW ORDER #${String(order.id || '').slice(0,6)} ---`);
 
-      // 1. VEHICLE TYPE MATCH
       const reqType = (order.vehicle_type_requested || order.vehicle_type || "").toLowerCase().trim();
       const myType = (vehicle.vehicle_type || "").toLowerCase().trim();
       if (reqType && reqType !== 'any' && reqType !== 'null' && reqType !== myType) {
@@ -326,7 +320,6 @@ export default function HomeSection({ t, regData, setActiveTab }) {
           return false;
       }
 
-      // 2. WEIGHT LOGIC (<= 1200 orders pass)
       const reqWeight = extractNum(order.weight_capacity_requested);
       const myWeight = extractNum(vehicle.weight_capacity);
       if (reqWeight > 0) {
@@ -336,7 +329,6 @@ export default function HomeSection({ t, regData, setActiveTab }) {
           }
       }
 
-      // 3. BODY TYPE MATCH 
       const reqBody = (order.body_type_requested || "").toLowerCase().trim();
       const myBody = (vehicle.body_type || "").toLowerCase().trim();
       if (reqBody && reqBody !== 'any' && reqBody !== 'null' && reqBody !== myBody) {
@@ -344,7 +336,6 @@ export default function HomeSection({ t, regData, setActiveTab }) {
           return false;
       }
 
-      // 4. DIMENSIONS MATCH
       const reqDim = extractNum(order.dimensions_requested);
       const myDim = extractNum(vehicle.dimensions);
       if (reqDim > 0) {
@@ -358,28 +349,40 @@ export default function HomeSection({ t, regData, setActiveTab }) {
       return true; 
   };
   
-  // Realtime Listener
+  // 🔥 100% REAL-TIME WEBSOCKET LISTENER (Updated!)
   useEffect(() => {
-    let orderSubscription;
-
-    if (isOnline) {
-      orderSubscription = supabase
-        .channel('public:driver_orders')
-        .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'driver_orders' }, payload => {
-          const newOrder = payload.new;
-          const status = (newOrder.status || "").toLowerCase().trim();
-          
-          if (status === '' || status === 'pending') {
-              if (checkOrderMatch(newOrder, driverVehicleDetails)) {
-                  setRingingOrder(newOrder); 
-              }
-          }
-        }).subscribe();
-    } else {
-      setRingingOrder(null);
+    if (!isOnline) {
+        setRingingOrder(null);
+        return;
     }
 
-    return () => { if (orderSubscription) supabase.removeChannel(orderSubscription); };
+    const orderSubscription = supabase
+      .channel('instant_order_alerts')
+      .on('postgres_changes', { 
+          event: 'INSERT', 
+          schema: 'public', 
+          table: 'driver_orders' 
+      }, (payload) => {
+        
+        const newOrder = payload.new;
+        console.log("⚡ INSTANT PING RECEIVED:", newOrder);
+
+        const status = (newOrder.status || "").toLowerCase().trim();
+        if (status === '' || status === 'pending') {
+            if (checkOrderMatch(newOrder, driverVehicleDetails)) {
+                setRingingOrder(newOrder); 
+            }
+        }
+
+      }).subscribe((status) => {
+          if (status === 'SUBSCRIBED') {
+              console.log("🟢 WebSocket Connected: Listening for real-time orders...");
+          }
+      });
+
+    return () => {
+      supabase.removeChannel(orderSubscription);
+    };
   }, [isOnline, driverVehicleDetails]);
 
   const acceptOrder = async (id) => {
@@ -401,7 +404,6 @@ export default function HomeSection({ t, regData, setActiveTab }) {
   const openNotifications = () => { setShowNotifications(true); setAlerts(prev => prev.map(a => ({ ...a, read: true }))); };
   const unreadCount = alerts.filter(a => !a.read).length;
 
-  // Safe driver name rendering to prevent crashes
   const displayFirstName = String(driverName || "Partner").split(" ")[0];
 
   return (

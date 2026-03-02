@@ -39,7 +39,7 @@ export default function ProfileSection({ t, setView, regData = {} }) {
             let safeMobile = String(regData.mobile).replace(/\D/g, '').slice(-10);
 
             try {
-                // 🔥 1. Fetch Core Profile FIRST
+                // 1. Fetch Core Profile FIRST
                 const { data: profile, error } = await supabase
                     .from('driver_profiles')
                     .select('*')
@@ -52,32 +52,29 @@ export default function ProfileSection({ t, setView, regData = {} }) {
                     setFetchError(""); 
                     setDriverUuid(profile.id);
 
-                    // 🔥 2. Fetch other tables separately using the UUID
+                    // 2. Fetch other tables separately using the UUID
                     const [
                         { data: stats },
                         { data: vehicle },
                         { data: bank },
-                        { data: docsArray }
+                        { data: docsData } // 🔥 FIX: Grab single object directly
                     ] = await Promise.all([
                         supabase.from('driver_stats').select('*').eq('driver_id', profile.id).maybeSingle(),
                         supabase.from('driver_vehicles').select('*').eq('driver_id', profile.id).maybeSingle(),
                         supabase.from('driver_bank_accounts').select('*').eq('driver_id', profile.id).maybeSingle(),
-                        supabase.from('driver_documentss').select('document_type, file_url').eq('driver_id', profile.id)
+                        // 🔥 FIX: Added .maybeSingle() to get the one row directly
+                        supabase.from('driver_documentss').select('aadhar_url, pan_url, license_url, rc_url, verification_status').eq('driver_id', profile.id).maybeSingle()
                     ]);
-
-                    let docs = { aadhar: null, pan: null, license: null, rc: null };
-                    if (docsArray) {
-                        docsArray.forEach(doc => { docs[doc.document_type] = doc.file_url; });
-                    }
 
                     const safeStats = stats || {};
                     const safeVehicle = vehicle || {};
                     const safeBank = bank || {};
+                    const safeDocs = docsData || {}; // 🔥 FIX: No more loop needed!
 
-                    // 🔥 Push data to UI based on your exact SQL table structure
+                    // Push data to UI based on your exact SQL table structure
                     setDbData({
                         fullName: profile.full_name || "Partner",
-                        driverId: profile.driver_id || "PENDING", // E.g., DRV2005ARJ
+                        driverId: profile.driver_id || "PENDING",
                         avatarUrl: profile.avatar_url || null,
                         referralCode: profile.referral_code || "NONE",
                         
@@ -95,14 +92,15 @@ export default function ProfileSection({ t, setView, regData = {} }) {
                         bankAccount: safeBank.account_number || "", 
                         ifscCode: safeBank.ifsc_code || "",
 
-                        aadharUrl: docs.aadhar,
-                        panUrl: docs.pan,
-                        licenseUrl: docs.license,
-                        rcUrl: docs.rc
+                        // 🔥 FIX: Directly read from the fetched row
+                        aadharUrl: safeDocs.aadhar_url || null,
+                        panUrl: safeDocs.pan_url || null,
+                        licenseUrl: safeDocs.license_url || null,
+                        rcUrl: safeDocs.rc_url || null
                     });
                 }
 
-                // 🔥 3. Safe Leaderboard Fetch (Bypasses inner join errors)
+                // 3. Safe Leaderboard Fetch 
                 const { data: topStats } = await supabase
                     .from('driver_stats')
                     .select('*')

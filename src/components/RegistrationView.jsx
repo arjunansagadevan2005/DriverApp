@@ -40,9 +40,9 @@ export default function RegistrationView({ regData, setRegData, setView }) {
       }));
   };
 
-  // 🔥 SUPABASE UPLOAD HELPER (Using 'driver_document' singular)
+  // 🔥 SUPABASE UPLOAD HELPER
   const uploadFileToSupabase = async (file, pathPrefix) => {
-      if (!file) return null;
+      if (!file || typeof file === 'string') return file; // Skip upload if it's already a URL string
       
       const fileExt = file.name.split('.').pop();
       const fileName = `${pathPrefix}-${Date.now()}.${fileExt}`;
@@ -84,11 +84,11 @@ export default function RegistrationView({ regData, setRegData, setView }) {
 
           let safeMobile = String(regData.mobile).replace(/\D/g, '').slice(-10);
 
-          // 🔥 GENERATE UNIQUE DRIVER ID (e.g., DRV2005ARJ)
           const birthYear = regData.dob ? new Date(regData.dob).getFullYear().toString() : new Date().getFullYear().toString();
           const nameStr = regData.fullName && regData.fullName.trim().length > 0 ? regData.fullName.trim() : 'UNK';
           const namePrefix = nameStr.substring(0, 3).toUpperCase().padEnd(3, 'X');
-          const generatedDriverId = `DRV${birthYear}${namePrefix}`;
+          const uniqueSuffix = Math.floor(1000 + Math.random() * 9000);
+          const generatedDriverId = `DRV${birthYear}${namePrefix}${uniqueSuffix}`;
 
           // 2. Insert Core Profile
           const { data: profileData, error: profileError } = await supabase
@@ -96,7 +96,7 @@ export default function RegistrationView({ regData, setRegData, setView }) {
               .upsert([{
                   mobile_number: safeMobile,
                   full_name: regData.fullName,
-                  driver_id: generatedDriverId, // Saves custom ID to DB
+                  driver_id: generatedDriverId, 
                   dob: regData.dob,
                   emergency_contact: regData.emergencyContact,
                   blood_group: regData.bloodGroup,
@@ -111,9 +111,18 @@ export default function RegistrationView({ regData, setRegData, setView }) {
               .select().single();
 
           if (profileError) throw profileError;
-          const driverUuid = profileData.id; // The UUID for foreign keys
+          const driverUuid = profileData.id; 
 
-          // 3. Insert Vehicle Details (Changed to .insert to bypass the 400 Bad Request error)
+          // 🔥 ANTI-409 CRASH PROTECTION
+          // Deletes any existing half-finished data for this exact driver before inserting fresh data
+          await Promise.all([
+              supabase.from('driver_vehicles').delete().eq('driver_id', driverUuid),
+              supabase.from('driver_bank_accounts').delete().eq('driver_id', driverUuid),
+              supabase.from('driver_stats').delete().eq('driver_id', driverUuid),
+              supabase.from('driver_documentss').delete().eq('driver_id', driverUuid)
+          ]);
+
+          // 3. Insert Vehicle Details (Matches your exact SQL)
           await supabase.from('driver_vehicles').insert([{
               driver_id: driverUuid,
               vehicle_type: regData.vehicleType,
@@ -122,7 +131,8 @@ export default function RegistrationView({ regData, setRegData, setView }) {
               weight_capacity: regData.vehicleWeight,
               dimensions: regData.vehicleDimensions,
               body_type: regData.bodyType,
-              registration_number: regData.vehicleNumber
+              registration_number: regData.vehicleNumber,
+              is_active: 'true' // Matches your text 'true' requirement
           }]);
 
           // 4. Insert Bank Details
@@ -139,19 +149,19 @@ export default function RegistrationView({ regData, setRegData, setView }) {
           }]);
 
           // 6. Insert Documents into driver_documentss
-          const docs = [];
-          if (aadharUrl) docs.push({ driver_id: driverUuid, document_type: 'aadhar', file_url: aadharUrl });
-          if (panUrl) docs.push({ driver_id: driverUuid, document_type: 'pan', file_url: panUrl });
-          if (licenseUrl) docs.push({ driver_id: driverUuid, document_type: 'license', file_url: licenseUrl });
-          if (rcUrl) docs.push({ driver_id: driverUuid, document_type: 'rc', file_url: rcUrl });
-
-          if (docs.length > 0) {
-              await supabase.from('driver_documentss').insert(docs);
+          if (aadharUrl || panUrl || licenseUrl || rcUrl) {
+              await supabase.from('driver_documentss').insert([{
+                  driver_id: driverUuid,
+                  verification_status: 'pending',
+                  aadhar_url: aadharUrl || null,
+                  pan_url: panUrl || null,
+                  rc_url: rcUrl || null,
+                  license_url: licenseUrl || null
+              }]);
           }
 
           alert(`Registration Complete!\nYour Driver ID is: ${generatedDriverId}`);
           
-          // 🔥 NEW: Save the session so the dashboard knows who is logged in!
           const sessionData = { 
               ...regData, 
               mobile: safeMobile,
@@ -161,7 +171,6 @@ export default function RegistrationView({ regData, setRegData, setView }) {
           localStorage.setItem('qc_driver_session', JSON.stringify(sessionData));
           localStorage.setItem('qc_current_view', 'dashboard');
           
-          // 🔥 NEW: Navigate to the Dashboard
           if (setView) {
               setView('dashboard');
           } else {
@@ -221,7 +230,11 @@ export default function RegistrationView({ regData, setRegData, setView }) {
                 <div className="relative inline-block">
                     <label className="block w-28 h-28 rounded-full bg-white dark:bg-slate-800 border-4 border-white dark:border-slate-700 shadow-lg overflow-hidden cursor-pointer group">
                     {regData.avatarFile ? (
-                        <img src={URL.createObjectURL(regData.avatarFile)} className="w-full h-full object-cover" alt="Profile" />
+                        <img 
+                            src={typeof regData.avatarFile === 'string' ? regData.avatarFile : (regData.avatarFile instanceof File || regData.avatarFile instanceof Blob ? URL.createObjectURL(regData.avatarFile) : '')} 
+                            className="w-full h-full object-cover" 
+                            alt="Profile" 
+                        />
                     ) : (
                         <div className="w-full h-full flex flex-col items-center justify-center text-slate-400">
                         {getIcon('user', 32, 'mb-1')}
